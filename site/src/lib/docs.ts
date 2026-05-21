@@ -187,11 +187,12 @@ export const rootCommands: DocCommand[] = [
   {
     title: "service",
     usage:
-      "webmux service install [--port <number>]\nwebmux service uninstall\nwebmux service status\nwebmux service logs",
+      "webmux service install [--port <number>]\nwebmux service uninstall\nwebmux service status\nwebmux service logs [--no-follow] [-n <lines>] [--since <time>]",
     description: "Manage webmux as a user-level service on Linux or macOS.",
     details: [
       "Uses systemctl --user on Linux and launchctl on macOS.",
       "install writes a service file that runs webmux serve --port ... from the git root.",
+      "logs follows the journal by default. Pass --no-follow to print history and exit, -n N to limit, or --since \"1 hour ago\" to time-bound (Linux only — macOS tail has no time filter).",
       "Not supported on other platforms.",
     ],
   },

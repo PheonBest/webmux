@@ -374,29 +374,124 @@ function status(config: ServiceConfig): void {
   }
 }
 
-function logs(config: ServiceConfig): void {
+export interface LogsOptions {
+  /** When true, follow the log (default). When false, print the full history
+   *  then exit — useful for piping into less/grep/save-to-file. */
+  follow: boolean;
+  /** Limit output to the last N lines. Maps to `journalctl -n` on Linux and
+   *  `tail -n` on macOS. Undefined → no limit (journalctl prints everything;
+   *  on macOS `cat` / `tail -f` cover the no-limit cases). */
+  lines: number | null;
+  /** Time-bounded filter (e.g. "1 hour ago", "2026-05-21 14:00"). Linux only
+   *  — macOS `tail` has no equivalent and a warning is logged when set. */
+  since: string | null;
+}
+
+export interface LogsCommand {
+  bin: string;
+  args: string[];
+  /** Set when an option was silently dropped (e.g. --since on macOS). The
+   *  caller surfaces this to the user before spawning so dropped filters
+   *  don't look like a working command. */
+  warning?: string;
+}
+
+/** Pure builder for the spawn command. Kept separate from the spawn call so
+ *  flag → argv mapping is unit-testable without hitting the filesystem or
+ *  spawning journalctl. */
+export function buildLogsCommand(
+  platform: Platform,
+  serviceName: string,
+  options: LogsOptions,
+  logPath: string,
+): LogsCommand {
+  if (platform === "linux") {
+    const args = ["--user", "-u", serviceName, "--no-pager"];
+    if (options.follow) args.push("-f");
+    if (options.lines !== null) args.push("-n", String(options.lines));
+    if (options.since !== null) args.push("--since", options.since);
+    return { bin: "journalctl", args };
+  }
+  // macOS: tail-based. tail can do `-n` + optional `-f`, but has no time
+  // filter — surface that limitation rather than dropping --since silently.
+  let warning: string | undefined;
+  if (options.since !== null) {
+    warning = `--since is not supported on macOS (launchd logs to a flat file). Ignoring "${options.since}".`;
+  }
+  // No follow + no lines → just cat the file (cheaper than `tail -n +1`).
+  if (!options.follow && options.lines === null) {
+    return { bin: "cat", args: [logPath], warning };
+  }
+  const args: string[] = [];
+  if (options.lines !== null) args.push("-n", String(options.lines));
+  if (options.follow) args.push("-f");
+  args.push(logPath);
+  return { bin: "tail", args, warning };
+}
+
+export interface LogsCliParseResult {
+  options: LogsOptions;
+  errors: string[];
+}
+
+/** Parse the logs subcommand's flags out of the post-action args slice.
+ *  Lenient about ordering and ignores unknown tokens (the dispatcher above
+ *  already validated the action). */
+export function parseLogsCliArgs(args: string[]): LogsCliParseResult {
+  const options: LogsOptions = { follow: true, lines: null, since: null };
+  const errors: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--no-follow") {
+      options.follow = false;
+    } else if (arg === "-f" || arg === "--follow") {
+      // Explicit follow — same as the default, accepted for symmetry.
+      options.follow = true;
+    } else if (arg === "-n" || arg === "--lines") {
+      const raw = args[i + 1];
+      if (raw === undefined) {
+        errors.push(`${arg} requires a numeric value`);
+        break;
+      }
+      i++;
+      const parsed = parseInt(raw, 10);
+      if (Number.isNaN(parsed) || parsed < 0) {
+        errors.push(`${arg} expects a non-negative integer (got: ${raw})`);
+        continue;
+      }
+      options.lines = parsed;
+    } else if (arg === "--since") {
+      const raw = args[i + 1];
+      if (raw === undefined) {
+        errors.push("--since requires a value (e.g. \"1 hour ago\")");
+        break;
+      }
+      i++;
+      options.since = raw;
+    }
+  }
+  return { options, errors };
+}
+
+function logs(config: ServiceConfig, options: LogsOptions): void {
   if (!isInstalled(config)) {
     p.log.error("Service is not installed.");
     return;
   }
 
-  let proc: ReturnType<typeof Bun.spawn>;
-  if (config.platform === "linux") {
-    proc = Bun.spawn(
-      ["journalctl", "--user", "-u", config.serviceName, "-f", "--no-pager"],
-      { stdout: "inherit", stderr: "inherit" },
-    );
-  } else {
-    const logPath = join(homedir(), "Library", "Logs", `webmux-${config.serviceName}.log`);
-    if (!existsSync(logPath)) {
-      p.log.error(`Log file not found: ${logPath}`);
-      return;
-    }
-    proc = Bun.spawn(["tail", "-f", logPath], {
-      stdout: "inherit",
-      stderr: "inherit",
-    });
+  const logPath = config.platform === "darwin"
+    ? join(homedir(), "Library", "Logs", `webmux-${config.serviceName}.log`)
+    : "";
+
+  if (config.platform === "darwin" && !existsSync(logPath)) {
+    p.log.error(`Log file not found: ${logPath}`);
+    return;
   }
+
+  const cmd = buildLogsCommand(config.platform, config.serviceName, options, logPath);
+  if (cmd.warning) p.log.warn(cmd.warning);
+
+  const proc = Bun.spawn([cmd.bin, ...cmd.args], { stdout: "inherit", stderr: "inherit" });
   process.on("SIGINT", () => proc.kill());
   proc.exited.then((code) => process.exit(code));
 }
@@ -411,13 +506,21 @@ Usage:
   webmux service install     Install, enable, and start the service
   webmux service uninstall   Stop, disable, and remove the service
   webmux service status      Show service status
-  webmux service logs        Tail service logs
+  webmux service logs        Show service logs (follows by default)
 
-Options:
+Install options:
   --port N                   Pin the service to a specific port. When omitted,
                              a free port is picked automatically by scanning
                              other webmux instances and installed services
                              — second-project installs no longer collide on 5111.
+
+Logs options:
+  --no-follow                Print the available history and exit instead of
+                             following. Useful for piping into less / grep.
+  -n, --lines N              Limit output to the last N lines.
+  --since <time>             Linux only — pass-through to journalctl --since
+                             (e.g. "1 hour ago", "2026-05-21 14:00"). On
+                             macOS this is logged and ignored.
 `);
 }
 
@@ -496,8 +599,14 @@ export default async function service(args: string[]): Promise<void> {
     case "status":
       status(config);
       break;
-    case "logs":
-      logs(config);
+    case "logs": {
+      const parsed = parseLogsCliArgs(args.slice(1));
+      if (parsed.errors.length > 0) {
+        for (const err of parsed.errors) p.log.error(err);
+        return;
+      }
+      logs(config, parsed.options);
       break;
+    }
   }
 }
