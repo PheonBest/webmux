@@ -212,8 +212,10 @@
   }
 
   function handleRowDragOver(event: DragEvent & { currentTarget: HTMLElement }, row: WorktreeListRow): void {
-    // Only allow dropping between siblings sharing the same parent.
+    // Only allow dropping between siblings sharing the same parent. Clear any
+    // lingering indicator when hovering the dragged row or a non-sibling.
     if (!draggingBranch || row.worktree.branch === draggingBranch || row.parentBranch !== draggingParent) {
+      dropTarget = null;
       return;
     }
     event.preventDefault();
@@ -238,7 +240,15 @@
 </script>
 
 <div class="relative flex min-h-0 flex-1 flex-col">
-  <ul bind:this={listEl} class="list-none overflow-y-auto flex-1 min-h-0 p-2">
+  <ul
+    bind:this={listEl}
+    class="list-none overflow-y-auto flex-1 min-h-0 p-2"
+    ondragleave={(event) => {
+      if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) {
+        dropTarget = null;
+      }
+    }}
+  >
     {#if rows.length === 0}
       <li class="px-3 py-4 text-xs text-muted text-center">{emptyMessage}</li>
     {/if}

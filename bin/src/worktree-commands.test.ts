@@ -277,9 +277,15 @@ describe("parseReorderCommandArgs", () => {
     });
   });
 
-  it("returns null for --help or a missing target", () => {
+  it("returns null only for --help", () => {
     expect(parseReorderCommandArgs(["--help"])).toBeNull();
-    expect(parseReorderCommandArgs(["feat-a"])).toBeNull();
+  });
+
+  it("throws when required args are missing", () => {
+    expect(() => parseReorderCommandArgs([])).toThrow("reorder requires a <branch> to move");
+    expect(() => parseReorderCommandArgs(["feat-a"])).toThrow(
+      "reorder requires --before <branch> or --after <branch>",
+    );
   });
 
   it("rejects using both --before and --after", () => {

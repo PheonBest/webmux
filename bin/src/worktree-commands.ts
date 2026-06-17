@@ -633,8 +633,11 @@ export function parseReorderCommandArgs(args: string[]): ParsedReorderCommand | 
     branch = arg;
   }
 
-  if (!branch || !target || !position) {
-    return null;
+  if (!branch) {
+    throw new CommandUsageError("reorder requires a <branch> to move");
+  }
+  if (!target || !position) {
+    throw new CommandUsageError("reorder requires --before <branch> or --after <branch>");
   }
 
   return { branch, target, position };
