@@ -5,7 +5,9 @@ import { join } from "node:path";
 import {
   buildProjectSessionName,
   buildWorktreeWindowName,
+  chooseUtf8Locale,
   parseWindowSummaries,
+  pickTmuxLocale,
   sanitizeTmuxNameSegment,
 } from "../adapters/tmux";
 
@@ -115,6 +117,18 @@ function parseManagedSessionResult(output: string): ManagedSessionResult {
   };
 }
 
+function parseGlobalEnvResult(output: string): { hasLeaked: boolean; hasKept: boolean } {
+  const value: unknown = JSON.parse(output);
+  if (!value || typeof value !== "object") {
+    throw new Error("global env result must be an object");
+  }
+  const { hasLeaked, hasKept } = value as { hasLeaked?: unknown; hasKept?: unknown };
+  if (typeof hasLeaked !== "boolean" || typeof hasKept !== "boolean") {
+    throw new Error("global env result must have boolean hasLeaked and hasKept");
+  }
+  return { hasLeaked, hasKept };
+}
+
 describe("sanitizeTmuxNameSegment", () => {
   it("normalizes arbitrary path-like input", () => {
     expect(sanitizeTmuxNameSegment("Workmux Web/Desktop")).toBe("workmux-web-desktop");
@@ -162,6 +176,51 @@ describe("parseWindowSummaries", () => {
         paneCount: 3,
       },
     ]);
+  });
+});
+
+describe("pickTmuxLocale", () => {
+  it("uses the host fallback when no locale is set", () => {
+    expect(pickTmuxLocale({}, "C.UTF-8")).toBe("C.UTF-8");
+  });
+
+  it("uses the host fallback when the inherited locale is not UTF-8", () => {
+    expect(pickTmuxLocale({ LANG: "C" }, "C.UTF-8")).toBe("C.UTF-8");
+    expect(pickTmuxLocale({ LC_ALL: "POSIX" }, "en_US.UTF-8")).toBe("en_US.UTF-8");
+  });
+
+  it("keeps an inherited UTF-8 locale (any spelling), ignoring the fallback", () => {
+    expect(pickTmuxLocale({ LANG: "en_US.UTF-8" }, "C.UTF-8")).toBe("en_US.UTF-8");
+    expect(pickTmuxLocale({ LANG: "C.UTF-8" }, "en_US.UTF-8")).toBe("C.UTF-8");
+    expect(pickTmuxLocale({ LANG: "en_GB.utf8" }, "C.UTF-8")).toBe("en_GB.utf8");
+  });
+
+  it("prefers LC_ALL, then LC_CTYPE, then LANG", () => {
+    expect(pickTmuxLocale({ LC_ALL: "en_US.UTF-8", LANG: "C" }, "C.UTF-8")).toBe("en_US.UTF-8");
+    expect(pickTmuxLocale({ LC_CTYPE: "de_DE.UTF-8", LANG: "C" }, "C.UTF-8")).toBe("de_DE.UTF-8");
+  });
+});
+
+describe("chooseUtf8Locale", () => {
+  it("prefers a neutral C.UTF-8 when available (macOS spelling)", () => {
+    expect(chooseUtf8Locale(["C", "C.UTF-8", "en_US.UTF-8", "POSIX"])).toBe("C.UTF-8");
+  });
+
+  it("prefers C.utf8 (glibc spelling) and returns the exact listed name", () => {
+    expect(chooseUtf8Locale(["C", "C.utf8", "en_US.utf8"])).toBe("C.utf8");
+  });
+
+  it("falls back to en_US.UTF-8 when C.UTF-8 is absent (older macOS)", () => {
+    expect(chooseUtf8Locale(["C", "POSIX", "en_US.UTF-8", "fr_FR.UTF-8"])).toBe("en_US.UTF-8");
+  });
+
+  it("uses any UTF-8 locale when no preferred one is present", () => {
+    expect(chooseUtf8Locale(["C", "de_DE.UTF-8"])).toBe("de_DE.UTF-8");
+  });
+
+  it("last-resorts to C.UTF-8 when nothing UTF-8 is listed or the list is empty", () => {
+    expect(chooseUtf8Locale(["C", "POSIX"])).toBe("C.UTF-8");
+    expect(chooseUtf8Locale([])).toBe("C.UTF-8");
   });
 });
 
@@ -293,6 +352,116 @@ describe("BunTmuxGateway", () => {
       ));
       expect(result.sessions).toEqual(["wm-managed"]);
       expect(result.destroyUnattached).toBe("off");
+    } finally {
+      await rm(testRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps launch-project .env keys out of the tmux global environment", async () => {
+    const testRoot = await mkdtemp(join(tmpdir(), "webmux-tmux-env-leak-"));
+    const projectRoot = join(testRoot, "repo");
+    const runnerPath = join(testRoot, "ensure-session.ts");
+    const tmuxModuleUrl = new URL("../adapters/tmux.ts", import.meta.url).href;
+    await mkdir(projectRoot, { recursive: true });
+    await Bun.write(
+      runnerPath,
+      [
+        `import { BunTmuxGateway } from ${JSON.stringify(tmuxModuleUrl)};`,
+        "",
+        "function read(args: string[]): string {",
+        '  const result = Bun.spawnSync(args, { stdout: "pipe", stderr: "pipe" });',
+        "  if (result.exitCode !== 0) {",
+        "    const stderr = new TextDecoder().decode(result.stderr).trim();",
+        '    throw new Error(`${args.join(" ")} failed: ${stderr || `exit ${result.exitCode}`}`);',
+        "  }",
+        '  return new TextDecoder().decode(result.stdout).trim();',
+        "}",
+        "",
+        "const projectRoot = process.argv[2];",
+        'if (!projectRoot) throw new Error("expected projectRoot");',
+        "const gateway = new BunTmuxGateway();",
+        // ensureServer + ensureSession is the path that first creates a persistent
+        // server, capturing this process's env into the tmux global environment.
+        "gateway.ensureServer();",
+        'gateway.ensureSession("wm-env-leak", projectRoot);',
+        'const globalEnv = read(["tmux", "show-environment", "-g"]).split("\\n");',
+        "console.log(JSON.stringify({",
+        '  hasLeaked: globalEnv.some((line) => line.startsWith("LEAKED_PROJECT_SECRET=")),',
+        '  hasKept: globalEnv.some((line) => line.startsWith("KEPT_SHELL_VAR=")),',
+        "}));",
+      ].join("\n"),
+    );
+
+    try {
+      const result = parseGlobalEnvResult(readWithIsolatedTmux(
+        ["bun", runnerPath, projectRoot],
+        buildEnv({
+          WEBMUX_PROJECT_ENV_KEYS: "LEAKED_PROJECT_SECRET",
+          LEAKED_PROJECT_SECRET: "service-role-key",
+          KEPT_SHELL_VAR: "ok",
+        }),
+      ));
+      // The project .env key is stripped from the env used to spawn tmux, so the
+      // server is born without it in the global environment...
+      expect(result.hasLeaked).toBe(false);
+      // ...while unrelated inherited vars are still passed through normally.
+      expect(result.hasKept).toBe(true);
+    } finally {
+      await rm(testRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("scrubs launch-project .env keys left in the global env by an already-running server", async () => {
+    const testRoot = await mkdtemp(join(tmpdir(), "webmux-tmux-env-scrub-"));
+    const projectRoot = join(testRoot, "repo");
+    const runnerPath = join(testRoot, "scrub.ts");
+    const tmuxModuleUrl = new URL("../adapters/tmux.ts", import.meta.url).href;
+    await mkdir(projectRoot, { recursive: true });
+    await Bun.write(
+      runnerPath,
+      [
+        `import { BunTmuxGateway } from ${JSON.stringify(tmuxModuleUrl)};`,
+        "",
+        "function run(args: string[], env?: Record<string, string>): void {",
+        '  const result = Bun.spawnSync(args, { stdout: "pipe", stderr: "pipe", ...(env ? { env } : {}) });',
+        "  if (result.exitCode !== 0) {",
+        "    const stderr = new TextDecoder().decode(result.stderr).trim();",
+        '    throw new Error(`${args.join(" ")} failed: ${stderr || `exit ${result.exitCode}`}`);',
+        "  }",
+        "}",
+        "",
+        "function globalHasLeaked(): boolean {",
+        '  const result = Bun.spawnSync(["tmux", "show-environment", "-g"], { stdout: "pipe", stderr: "pipe" });',
+        '  return new TextDecoder().decode(result.stdout).split("\\n").some((line) => line.startsWith("LEAKED_PROJECT_SECRET="));',
+        "}",
+        "",
+        "const projectRoot = process.argv[2];",
+        'if (!projectRoot) throw new Error("expected projectRoot");',
+        // Simulate a server started before the stripped-env fix: its global env
+        // captured the leaked key. gateway commands never spawn with it set, so
+        // only the scrub can remove it. destroy-unattached off keeps this
+        // detached session (and thus the server + its global env) alive even when
+        // the tmux config enables destroy-unattached.
+        'run(["tmux", "new-session", "-d", "-s", "preexisting", "-c", projectRoot, ";", "set-option", "-t", "preexisting", "destroy-unattached", "off"], { ...process.env, LEAKED_PROJECT_SECRET: "service-role-key" } as Record<string, string>);',
+        "const before = globalHasLeaked();",
+        "const gateway = new BunTmuxGateway();",
+        "gateway.ensureServer();",
+        'gateway.ensureSession("wm-scrub", projectRoot);',
+        "console.log(JSON.stringify({ before, after: globalHasLeaked() }));",
+      ].join("\n"),
+    );
+
+    try {
+      const output = readWithIsolatedTmux(
+        ["bun", runnerPath, projectRoot],
+        buildEnv({ WEBMUX_PROJECT_ENV_KEYS: "LEAKED_PROJECT_SECRET" }),
+      );
+      const value: unknown = JSON.parse(output);
+      const { before, after } = value as { before?: unknown; after?: unknown };
+      // The pre-existing server really did leak the key into the global env...
+      expect(before).toBe(true);
+      // ...and ensureSession's self-heal scrub removed it.
+      expect(after).toBe(false);
     } finally {
       await rm(testRoot, { recursive: true, force: true });
     }

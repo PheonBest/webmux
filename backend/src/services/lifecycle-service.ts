@@ -19,7 +19,7 @@ import { type DockerGateway } from "../adapters/docker";
 import { buildProjectSessionName, buildWorktreeParkingWindowName, buildWorktreeWindowName, type TmuxGateway } from "../adapters/tmux";
 import { captureNewSessionId, type SessionDiscoveryGateway } from "../adapters/session-discovery";
 import type { AgentId, ProfileConfig, ProjectConfig, RuntimeKind } from "../domain/config";
-import { ROOT_TAB_ID, type OneshotMeta, type WorktreeCreationPhase, type WorktreeMeta, type WorktreeSource, type WorktreeTab } from "../domain/model";
+import { ROOT_TAB_ID, type ControlEnvMap, type OneshotMeta, type WorktreeCreationPhase, type WorktreeMeta, type WorktreeSource, type WorktreeTab } from "../domain/model";
 import {
   activeTabId as readActiveTabId,
   appendTab,
@@ -156,7 +156,9 @@ export interface CreateWorktreeProgress {
 
 export interface LifecycleServiceDependencies {
   projectRoot: string;
-  controlBaseUrl: string;
+  /** Absent when control reporting isn't configured (e.g. a CLI runtime that
+   *  couldn't resolve the project's route prefix). No control.env is written. */
+  controlBaseUrl?: string;
   getControlToken: () => Promise<string>;
   config: ProjectConfig;
   archiveState: ArchiveStateService;
@@ -690,10 +692,14 @@ export class LifecycleService {
   async pruneWorktrees(): Promise<PruneWorktreesResult> {
     try {
       const resolvedWorktrees = await this.resolveAllWorktrees();
+      const sessionName = buildProjectSessionName(this.deps.projectRoot);
       const removedBranches: string[] = [];
 
       for (const resolved of resolvedWorktrees) {
         const branch = resolved.entry.branch ?? resolved.entry.path;
+        if (this.deps.tmux.hasWindow(sessionName, buildWorktreeWindowName(branch))) {
+          continue;
+        }
         await this.removeResolvedWorktree(resolved);
         removedBranches.push(branch);
       }
@@ -1014,8 +1020,7 @@ export class LifecycleService {
       allocatedPorts: await this.allocatePorts(),
       runtimeEnvExtras: { WEBMUX_WORKTREE_PATH: resolved.entry.path },
       dotenvValues,
-      controlUrl: this.controlUrl(profile.runtime),
-      controlToken: await this.deps.getControlToken(),
+      ...(await this.controlEnvFields(profile.runtime)),
     });
   }
 
@@ -1044,13 +1049,17 @@ export class LifecycleService {
     }, dotenvValues);
     await writeRuntimeEnv(input.gitDir, runtimeEnv);
 
-    const controlEnv = buildControlEnvMap({
-      controlUrl: this.controlUrl(input.meta.runtime),
-      controlToken: await this.deps.getControlToken(),
-      worktreeId: input.meta.worktreeId,
-      branch: input.meta.branch,
-    });
-    await writeControlEnv(input.gitDir, controlEnv);
+    const controlUrl = this.controlUrl(input.meta.runtime);
+    let controlEnv: ControlEnvMap | null = null;
+    if (controlUrl) {
+      controlEnv = buildControlEnvMap({
+        controlUrl,
+        controlToken: await this.deps.getControlToken(),
+        worktreeId: input.meta.worktreeId,
+        branch: input.meta.branch,
+      });
+      await writeControlEnv(input.gitDir, controlEnv);
+    }
 
     return {
       meta: input.meta,
@@ -1279,8 +1288,18 @@ export class LifecycleService {
     }
   }
 
-  private controlUrl(runtime: RuntimeKind): string {
+  private controlUrl(runtime: RuntimeKind): string | undefined {
+    if (!this.deps.controlBaseUrl) return undefined;
     return `${buildRuntimeControlBaseUrl(this.deps.controlBaseUrl, runtime)}/api/runtime/events`;
+  }
+
+  /** Control URL + token, paired so they're always both set or both absent
+   *  (initializeManagedWorktree rejects one without the other). Empty when
+   *  control reporting isn't configured. */
+  private async controlEnvFields(runtime: RuntimeKind): Promise<{ controlUrl?: string; controlToken?: string }> {
+    const controlUrl = this.controlUrl(runtime);
+    if (!controlUrl) return {};
+    return { controlUrl, controlToken: await this.deps.getControlToken() };
   }
 
   private async removeResolvedWorktree(
@@ -1416,8 +1435,7 @@ export class LifecycleService {
           startupEnvValues: await this.buildStartupEnvValues(input.envOverrides),
           allocatedPorts: await this.allocatePorts(),
           runtimeEnvExtras: { WEBMUX_WORKTREE_PATH: worktreePath },
-          controlUrl: this.controlUrl(profile.runtime),
-          controlToken: await this.deps.getControlToken(),
+          ...(await this.controlEnvFields(profile.runtime)),
           deleteBranchOnRollback,
           source,
           ...(input.oneshot ? { oneshot: input.oneshot } : {}),

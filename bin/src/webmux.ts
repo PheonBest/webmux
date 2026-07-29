@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { Subprocess } from "bun";
 import pkg from "../../package.json";
+import { webmuxConfigEnvPath } from "../../backend/src/adapters/webmux-paths";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -33,7 +34,8 @@ Usage:
   webmux merge        Merge a worktree into the main branch and remove it
   webmux send         Send a prompt to a running worktree agent
   webmux tab          List, create, switch, or close agent tabs in a worktree
-  webmux prune        Remove all worktrees in the current project
+  webmux prune        Remove all closed (not open) worktrees in the current project
+  webmux restore      Re-open all worktree sessions that were open before
   webmux linear       Post a worktree conversation to a Linear issue/team
   webmux project      List, add, or remove projects served by the dashboard
   webmux completion   Generate shell completion script (bash, zsh)
@@ -51,7 +53,7 @@ Environment:
 `);
 }
 
-type RootCommand = "serve" | "init" | "service" | "update" | "add" | "oneshot" | "list" | "open" | "close" | "refresh" | "archive" | "unarchive" | "label" | "profile" | "remove" | "merge" | "send" | "tab" | "prune" | "linear" | "project" | "completion" | null;
+type RootCommand = "serve" | "init" | "service" | "update" | "add" | "oneshot" | "list" | "open" | "close" | "refresh" | "archive" | "unarchive" | "label" | "profile" | "remove" | "merge" | "send" | "tab" | "prune" | "restore" | "linear" | "project" | "completion" | null;
 
 interface ParsedRootArgs {
   port: number;
@@ -85,6 +87,7 @@ function isRootCommand(value: string): value is NonNullable<RootCommand> {
     || value === "send"
     || value === "tab"
     || value === "prune"
+    || value === "restore"
     || value === "linear"
     || value === "project"
     || value === "completion";
@@ -164,7 +167,7 @@ export function parseRootArgs(args: string[]): ParsedRootArgs {
   };
 }
 
-function isWorktreeCommand(command: RootCommand): command is "add" | "list" | "open" | "close" | "refresh" | "archive" | "unarchive" | "label" | "profile" | "remove" | "merge" | "send" | "tab" | "prune" {
+function isWorktreeCommand(command: RootCommand): command is "add" | "list" | "open" | "close" | "refresh" | "archive" | "unarchive" | "label" | "profile" | "remove" | "merge" | "send" | "tab" | "prune" | "restore" {
   return command === "add"
     || command === "list"
     || command === "open"
@@ -178,13 +181,19 @@ function isWorktreeCommand(command: RootCommand): command is "add" | "list" | "o
     || command === "merge"
     || command === "send"
     || command === "tab"
-    || command === "prune";
+    || command === "prune"
+    || command === "restore";
 }
 
 // ── Load env files from CWD (.env.local overrides .env) ─────────────────────
 
-async function loadEnvFile(path: string) {
-  if (!existsSync(path)) return;
+/** Load a `.env` file from CWD into `process.env`, returning the keys it added.
+ *  Those keys are the launch project's env: webmux tracks them so it can keep
+ *  them out of the tmux server's *global* environment (see WEBMUX_PROJECT_ENV_KEYS),
+ *  where they would otherwise leak into every project's sessions and panes. */
+async function loadEnvFile(path: string): Promise<string[]> {
+  if (!existsSync(path)) return [];
+  const added: string[] = [];
   const lines = (await Bun.file(path).text()).split("\n");
   for (const line of lines) {
     const trimmed = line.trim();
@@ -195,8 +204,10 @@ async function loadEnvFile(path: string) {
     const val = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
     if (!(key in process.env)) {
       process.env[key] = val;
+      added.push(key);
     }
   }
+  return added;
 }
 
 // ── Browser app mode ─────────────────────────────────────────────────────────
@@ -326,6 +337,7 @@ async function main(args: string[] = process.argv.slice(2)): Promise<void> {
           const outcome = await updateInstalledService(svc, webmuxPath);
           const parts: string[] = [];
           if (outcome.regenerated) parts.push("regenerated unit");
+          if (outcome.migratedProject) parts.push(`migrated served project ${outcome.migratedProject}`);
           if (outcome.restarted) parts.push("restarted");
           if (!outcome.regenerated && !outcome.restarted && !outcome.error) parts.push("no change");
           const status = outcome.error
@@ -338,8 +350,17 @@ async function main(args: string[] = process.argv.slice(2)): Promise<void> {
     process.exit(code);
   }
 
-  await loadEnvFile(resolve(process.cwd(), ".env.local"));
-  await loadEnvFile(resolve(process.cwd(), ".env"));
+  const projectEnvKeys = new Set<string>();
+  for (const key of await loadEnvFile(resolve(process.cwd(), ".env.local"))) projectEnvKeys.add(key);
+  for (const key of await loadEnvFile(resolve(process.cwd(), ".env"))) projectEnvKeys.add(key);
+
+  // webmux's own global config env (`~/.config/webmux/.env`): machine-wide
+  // secrets like LINEAR_API_KEY the single service reads regardless of which
+  // directory it runs from. Loaded last so an already-set value wins — the unit
+  // and the launch project's `.env` both take precedence. Its keys join
+  // projectEnvKeys so they're stripped from the tmux global environment like any
+  // other secret webmux loads, rather than leaking into every session and pane.
+  for (const key of await loadEnvFile(webmuxConfigEnvPath())) projectEnvKeys.add(key);
 
   // When the user didn't pin a port, point CLI commands at the live server for
   // this project rather than the 5111 default. `webmux serve` walks to a free
@@ -413,6 +434,9 @@ async function main(args: string[] = process.argv.slice(2)): Promise<void> {
     ...process.env,
     PORT: String(parsed.port),
     WEBMUX_PROJECT_DIR: process.cwd(),
+    // Tell the backend which keys came from the launch project's `.env` so it can
+    // strip them from the tmux server's global environment (see tmux adapter).
+    ...(projectEnvKeys.size > 0 ? { WEBMUX_PROJECT_ENV_KEYS: [...projectEnvKeys].join(",") } : {}),
     ...(parsed.debug ? { WEBMUX_DEBUG: "1" } : {}),
   };
 

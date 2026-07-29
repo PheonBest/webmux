@@ -2,12 +2,13 @@ import * as p from "@clack/prompts";
 import { createApi } from "@webmux/api-contract";
 import { basename, resolve } from "node:path";
 import { buildSeedFromLinear, defaultSeedFromLinearDeps } from "../../backend/src/services/conversation-export-service";
-import { CommandUsageError, resolveProjectBaseUrl, withServerConnection } from "./shared";
-import { readWorktreeArchiveState, readWorktreeMeta } from "../../backend/src/adapters/fs";
+import { CommandUsageError, resolveProjectBaseUrl, resolveProjectPrefix, withServerConnection } from "./shared";
+import { readOpenSessionsState, readWorktreeArchiveState, readWorktreeMeta, readWorktreePrs } from "../../backend/src/adapters/fs";
+import type { OpenSessionsState, PrEntry } from "../../backend/src/domain/model";
 import { buildProjectSessionName, buildWorktreeWindowName } from "../../backend/src/adapters/tmux";
 import type { AgentId } from "../../backend/src/domain/config";
 import type { WorktreeCreationPhase } from "../../backend/src/domain/model";
-import { isValidWorktreeName } from "../../backend/src/domain/policies";
+import { compareWorktreeOrder, isValidWorktreeName } from "../../backend/src/domain/policies";
 import { buildArchivedWorktreePathSet } from "../../backend/src/services/archive-service";
 import { createWebmuxRuntime } from "../../backend/src/runtime";
 import type { CreateLifecycleWorktreeInput, CreateLifecycleWorktreesInput, CreateLifecycleWorktreesResult, CreateWorktreeProgress, PruneWorktreesResult } from "../../backend/src/services/lifecycle-service";
@@ -20,7 +21,7 @@ const PHASE_LABELS: Record<WorktreeCreationPhase, string> = {
   reconciling: "Reconciling",
 };
 
-export type WorktreeSubcommand = "add" | "list" | "open" | "close" | "refresh" | "remove" | "merge" | "send" | "prune" | "archive" | "unarchive" | "label" | "profile" | "tab";
+export type WorktreeSubcommand = "add" | "list" | "open" | "close" | "refresh" | "remove" | "merge" | "send" | "prune" | "restore" | "archive" | "unarchive" | "label" | "profile" | "tab";
 
 type WorktreeListMode = "active" | "all" | "archived";
 
@@ -66,6 +67,7 @@ interface WorktreeCommandDependencies {
   createRuntime?: (options: {
     projectDir: string;
     port: number;
+    prefix?: string;
     onCreateProgress?: (progress: CreateWorktreeProgress) => void;
   }) => WorktreeRuntimeLike;
   stdout?: (message: string) => void;
@@ -75,6 +77,14 @@ interface WorktreeCommandDependencies {
   /** Resolve the project-scoped base URL for server-backed commands (send/tab).
    *  Injectable so tests can exercise the HTTP shape without a live server. */
   resolveBaseUrl?: (port: number, projectDir: string) => Promise<string>;
+  /** Resolve the project's route prefix so control.env written by in-process
+   *  commands (add/open/refresh) matches the dashboard's prefixed routes.
+   *  Returns undefined when it can't be resolved (no server), so no control URL
+   *  is written. Injectable so tests can drive it without a live server. */
+  resolveProjectPrefix?: (port: number, projectDir: string) => Promise<string | undefined>;
+  /** Read the saved open-sessions snapshot (used by `restore`). Injectable so
+   *  tests can drive restore without touching the filesystem. */
+  readOpenSessions?: (gitDir: string) => Promise<OpenSessionsState>;
 }
 
 export function getWorktreeCommandUsage(command: WorktreeSubcommand): string {
@@ -157,6 +167,8 @@ export function getWorktreeCommandUsage(command: WorktreeSubcommand): string {
       ].join("\n");
     case "prune":
       return "Usage:\n  webmux prune";
+    case "restore":
+      return "Usage:\n  webmux restore\n\nRe-open every worktree session that was open the last time sessions were saved.";
     case "tab":
       return [
         "Usage:",
@@ -608,6 +620,22 @@ function parsePruneCommandArgs(args: string[]): boolean {
   return true;
 }
 
+function parseRestoreCommandArgs(args: string[]): boolean {
+  for (const arg of args) {
+    if (arg === "--help" || arg === "-h") {
+      return false;
+    }
+
+    if (arg.startsWith("-")) {
+      throw new CommandUsageError(`Unknown option: ${arg}`);
+    }
+
+    throw new CommandUsageError(`Unexpected argument: ${arg}`);
+  }
+
+  return true;
+}
+
 export function parseListCommandArgs(args: string[]): ParsedListCommand | null {
   let mode: WorktreeListMode = "active";
   let search = "";
@@ -657,9 +685,24 @@ function listProjectWorktrees(
     .filter((entry) => !entry.bare && resolve(entry.path) !== projectDir);
 }
 
+function buildOpenWorktreeWindowSet(runtime: WorktreeRuntimeLike): Set<string> {
+  const sessionName = buildProjectSessionName(resolve(runtime.projectDir));
+  let windows: Array<{ sessionName: string; windowName: string }> = [];
+  try {
+    windows = runtime.tmux.listWindows();
+  } catch {
+    windows = [];
+  }
+  return new Set(
+    windows
+      .filter((w) => w.sessionName === sessionName)
+      .map((w) => w.windowName),
+  );
+}
+
 async function defaultConfirmPrune(worktreeCount: number): Promise<boolean> {
   const response = await p.confirm({
-    message: `Prune all ${worktreeCount} worktree${worktreeCount === 1 ? "" : "s"}? This action cannot be undone.`,
+    message: `Prune ${worktreeCount} closed worktree${worktreeCount === 1 ? "" : "s"}? This action cannot be undone.`,
     initialValue: false,
   });
   return !p.isCancel(response) && response;
@@ -701,6 +744,7 @@ interface ListedWorktreeRow {
   label: string | null;
   isOpen: boolean;
   archived: boolean;
+  prStates: PrEntry["state"][];
   info: string;
   searchText: string;
 }
@@ -722,19 +766,7 @@ async function listWorktrees(
     return;
   }
 
-  const sessionName = buildProjectSessionName(projectDir);
-  let windows: Array<{ sessionName: string; windowName: string }> = [];
-  try {
-    windows = runtime.tmux.listWindows();
-  } catch {
-    windows = [];
-  }
-
-  const openWindows = new Set(
-    windows
-      .filter((w) => w.sessionName === sessionName)
-      .map((w) => w.windowName),
-  );
+  const openWindows = buildOpenWorktreeWindowSet(runtime);
 
   const projectGitDir = runtime.git.resolveWorktreeGitDir(projectDir);
   const archivedPaths = buildArchivedWorktreePathSet(await readWorktreeArchiveState(projectGitDir));
@@ -743,12 +775,14 @@ async function listWorktrees(
     const isOpen = openWindows.has(buildWorktreeWindowName(branch));
     const gitDir = runtime.git.resolveWorktreeGitDir(entry.path);
     const meta = await readWorktreeMeta(gitDir);
+    const prs = await readWorktreePrs(gitDir);
     const info = meta ? `${meta.profile} / ${meta.agent}` : "";
     return {
       branch,
       label: meta?.label ?? null,
       isOpen,
       archived: archivedPaths.has(resolve(entry.path)),
+      prStates: prs.map((pr) => pr.state),
       info,
       searchText: [
         meta?.label ?? "",
@@ -762,7 +796,12 @@ async function listWorktrees(
 
   const matchingRows = rows
     .filter((row) => matchesListSearch(row, options.search.trim()))
-    .sort((a, b) => a.branch.localeCompare(b.branch));
+    .sort((a, b) =>
+      compareWorktreeOrder(
+        { branch: a.branch, open: a.isOpen, prStates: a.prStates },
+        { branch: b.branch, open: b.isOpen, prStates: b.prStates },
+      )
+    );
   const visibleRows = matchingRows.filter((row) => {
     if (options.mode === "all") return true;
     if (options.mode === "archived") return row.archived;
@@ -812,12 +851,29 @@ export async function runWorktreeCommand(
   context: WorktreeCommandContext,
   deps: WorktreeCommandDependencies = {},
 ): Promise<number> {
-  const createRuntime = deps.createRuntime ?? ((options: { projectDir: string; port: number }) => createWebmuxRuntime(options));
+  const createRuntime = deps.createRuntime ?? ((options) => createWebmuxRuntime(options));
   const stdout = deps.stdout ?? ((message: string) => console.log(message));
   const stderr = deps.stderr ?? ((message: string) => console.error(message));
   const resolveBaseUrl = deps.resolveBaseUrl ?? resolveProjectBaseUrl;
   const switchToTmuxWindow = deps.switchToTmuxWindow ?? defaultSwitchToTmuxWindow;
   const confirmPrune = deps.confirmPrune ?? defaultConfirmPrune;
+  const readOpenSessions = deps.readOpenSessions ?? readOpenSessionsState;
+
+  // The project's route prefix, resolved from the running server at most once.
+  // Only commands that write control.env (add/open/refresh) need it.
+  //
+  // `createRuntime === undefined` is the production sentinel: real callers never
+  // inject deps, so production always resolves. A test that injects createRuntime
+  // without a prefix resolver skips the lookup, keeping offline commands offline.
+  const shouldResolvePrefix = deps.resolveProjectPrefix !== undefined || deps.createRuntime === undefined;
+  let prefixPromise: Promise<string | undefined> | null = null;
+  const resolvePrefix = (): Promise<string | undefined> => {
+    if (!shouldResolvePrefix) return Promise.resolve(undefined);
+    if (!prefixPromise) {
+      prefixPromise = (deps.resolveProjectPrefix ?? resolveProjectPrefix)(context.port, context.projectDir);
+    }
+    return prefixPromise;
+  };
 
   try {
     if (context.command === "add") {
@@ -830,6 +886,7 @@ export async function runWorktreeCommand(
       const runtime = createRuntime({
         projectDir: context.projectDir,
         port: context.port,
+        prefix: await resolvePrefix(),
         onCreateProgress: (progress) => {
           stdout(PHASE_LABELS[progress.phase] ?? progress.phase);
         },
@@ -907,20 +964,103 @@ export async function runWorktreeCommand(
         return 0;
       }
 
-      if (!await confirmPrune(worktrees.length)) {
+      const openWindows = buildOpenWorktreeWindowSet(runtime);
+      const closedWorktrees = worktrees.filter(
+        (entry) => !openWindows.has(buildWorktreeWindowName(entry.branch ?? basename(entry.path))),
+      );
+      if (closedWorktrees.length === 0) {
+        stdout("No closed worktrees to prune.");
+        return 0;
+      }
+
+      if (!await confirmPrune(closedWorktrees.length)) {
         stdout("Aborted.");
         return 0;
       }
 
       const result = await runtime.lifecycleService.pruneWorktrees();
       if (result.removedBranches.length === 0) {
-        stdout("No worktrees found.");
+        stdout("No closed worktrees to prune.");
         return 0;
       }
       stdout(
         `Pruned ${result.removedBranches.length} worktree${result.removedBranches.length === 1 ? "" : "s"}: ${result.removedBranches.join(", ")}`,
       );
       return 0;
+    }
+
+    if (context.command === "restore") {
+      if (!parseRestoreCommandArgs(context.args)) {
+        stdout(getWorktreeCommandUsage("restore"));
+        return 0;
+      }
+
+      const runtime = createRuntime({
+        projectDir: context.projectDir,
+        port: context.port,
+        prefix: await resolvePrefix(),
+      });
+      const projectDir = resolve(runtime.projectDir);
+      const gitDir = runtime.git.resolveWorktreeGitDir(projectDir);
+      const state = await readOpenSessions(gitDir);
+
+      if (state.branches.length === 0) {
+        stdout("No saved sessions to restore.");
+        return 0;
+      }
+
+      const sessionName = buildProjectSessionName(projectDir);
+      let openWindows = new Set<string>();
+      try {
+        openWindows = new Set(
+          runtime.tmux.listWindows()
+            .filter((w) => w.sessionName === sessionName)
+            .map((w) => w.windowName),
+        );
+      } catch {
+        openWindows = new Set();
+      }
+
+      const existingBranches = new Set(
+        listProjectWorktrees(runtime).map((entry) => entry.branch ?? basename(entry.path)),
+      );
+
+      let restored = 0;
+      let skipped = 0;
+      let failed = 0;
+      let firstRestored: string | null = null;
+
+      for (const branch of state.branches) {
+        if (openWindows.has(buildWorktreeWindowName(branch))) {
+          stdout(`Already open: ${branch}`);
+          skipped++;
+          continue;
+        }
+        if (!existingBranches.has(branch)) {
+          stderr(`Skipping ${branch}: worktree no longer exists`);
+          skipped++;
+          continue;
+        }
+        try {
+          await runtime.lifecycleService.openWorktree(branch);
+          stdout(`Restored ${branch}`);
+          restored++;
+          if (!firstRestored) firstRestored = branch;
+        } catch (error) {
+          stderr(`Failed to restore ${branch}: ${error instanceof Error ? error.message : String(error)}`);
+          failed++;
+        }
+      }
+
+      const summaryParts = [`Restored ${restored} session${restored === 1 ? "" : "s"}`];
+      if (skipped > 0) summaryParts.push(`skipped ${skipped}`);
+      if (failed > 0) summaryParts.push(`${failed} failed`);
+      stdout(`${summaryParts.join(", ")}.`);
+
+      if (firstRestored) {
+        switchToTmuxWindow(runtime.projectDir, firstRestored);
+      }
+      return failed > 0 ? 1 : 0;
     }
 
     if (context.command === "send") {
@@ -1010,9 +1150,12 @@ export async function runWorktreeCommand(
         return 0;
       }
 
+      // Switching profiles reopens the worktree, which rewrites control.env —
+      // so it needs the prefixed control URL, same as open/refresh.
       const runtime = createRuntime({
         projectDir: context.projectDir,
         port: context.port,
+        prefix: await resolvePrefix(),
       });
       const result = await runtime.lifecycleService.setWorktreeProfile(parsed.branch, parsed.profile);
       stdout(result.restarted
@@ -1021,16 +1164,20 @@ export async function runWorktreeCommand(
       return 0;
     }
 
-    const command: Exclude<WorktreeSubcommand, "add" | "list" | "send" | "prune" | "label" | "profile" | "tab"> = context.command;
+    const command: Exclude<WorktreeSubcommand, "add" | "list" | "send" | "prune" | "restore" | "label" | "profile" | "tab"> = context.command;
     const branch = parseBranchCommandArgs(context.args);
     if (!branch) {
       stdout(getWorktreeCommandUsage(command));
       return 0;
     }
 
+    // open/refresh rewrite control.env, so they need the prefixed control URL;
+    // the rest (close/archive/unarchive/remove/merge) don't touch it.
+    const needsPrefix = command === "open" || command === "refresh";
     const runtime = createRuntime({
       projectDir: context.projectDir,
       port: context.port,
+      prefix: needsPrefix ? await resolvePrefix() : undefined,
     });
 
     switch (command) {
