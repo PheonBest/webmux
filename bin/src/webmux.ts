@@ -28,6 +28,7 @@ Usage:
   webmux archive      Hide a worktree from the default list
   webmux unarchive    Show an archived worktree again
   webmux label        Set or clear a workspace label
+  webmux profile      Switch a worktree to another profile
   webmux remove       Remove a worktree
   webmux merge        Merge a worktree into the main branch and remove it
   webmux send         Send a prompt to a running worktree agent
@@ -50,7 +51,7 @@ Environment:
 `);
 }
 
-type RootCommand = "serve" | "init" | "service" | "update" | "add" | "oneshot" | "list" | "open" | "close" | "refresh" | "archive" | "unarchive" | "label" | "remove" | "merge" | "send" | "tab" | "prune" | "linear" | "project" | "completion" | null;
+type RootCommand = "serve" | "init" | "service" | "update" | "add" | "oneshot" | "list" | "open" | "close" | "refresh" | "archive" | "unarchive" | "label" | "profile" | "remove" | "merge" | "send" | "tab" | "prune" | "linear" | "project" | "completion" | null;
 
 interface ParsedRootArgs {
   port: number;
@@ -78,6 +79,7 @@ function isRootCommand(value: string): value is NonNullable<RootCommand> {
     || value === "archive"
     || value === "unarchive"
     || value === "label"
+    || value === "profile"
     || value === "remove"
     || value === "merge"
     || value === "send"
@@ -162,7 +164,7 @@ export function parseRootArgs(args: string[]): ParsedRootArgs {
   };
 }
 
-function isWorktreeCommand(command: RootCommand): command is "add" | "list" | "open" | "close" | "refresh" | "archive" | "unarchive" | "label" | "remove" | "merge" | "send" | "tab" | "prune" {
+function isWorktreeCommand(command: RootCommand): command is "add" | "list" | "open" | "close" | "refresh" | "archive" | "unarchive" | "label" | "profile" | "remove" | "merge" | "send" | "tab" | "prune" {
   return command === "add"
     || command === "list"
     || command === "open"
@@ -171,6 +173,7 @@ function isWorktreeCommand(command: RootCommand): command is "add" | "list" | "o
     || command === "archive"
     || command === "unarchive"
     || command === "label"
+    || command === "profile"
     || command === "remove"
     || command === "merge"
     || command === "send"
