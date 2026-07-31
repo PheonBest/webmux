@@ -34,6 +34,7 @@ Usage:
   webmux merge        Merge a worktree into the main branch and remove it
   webmux send         Send a prompt to a running worktree agent
   webmux tab          List, create, switch, or close agent tabs in a worktree
+  webmux reorder      Reorder a worktree in the list (persisted)
   webmux prune        Remove all closed (not open) worktrees in the current project
   webmux restore      Re-open all worktree sessions that were open before
   webmux linear       Post a worktree conversation to a Linear issue/team
@@ -53,7 +54,7 @@ Environment:
 `);
 }
 
-type RootCommand = "serve" | "init" | "service" | "update" | "add" | "oneshot" | "list" | "open" | "close" | "refresh" | "archive" | "unarchive" | "label" | "profile" | "remove" | "merge" | "send" | "tab" | "prune" | "restore" | "linear" | "project" | "completion" | null;
+type RootCommand = "serve" | "init" | "service" | "update" | "add" | "oneshot" | "list" | "open" | "close" | "refresh" | "archive" | "unarchive" | "label" | "profile" | "remove" | "merge" | "send" | "tab" | "reorder" | "prune" | "restore" | "linear" | "project" | "completion" | null;
 
 interface ParsedRootArgs {
   port: number;
@@ -86,6 +87,7 @@ function isRootCommand(value: string): value is NonNullable<RootCommand> {
     || value === "merge"
     || value === "send"
     || value === "tab"
+    || value === "reorder"
     || value === "prune"
     || value === "restore"
     || value === "linear"
@@ -167,7 +169,7 @@ export function parseRootArgs(args: string[]): ParsedRootArgs {
   };
 }
 
-function isWorktreeCommand(command: RootCommand): command is "add" | "list" | "open" | "close" | "refresh" | "archive" | "unarchive" | "label" | "profile" | "remove" | "merge" | "send" | "tab" | "prune" | "restore" {
+function isWorktreeCommand(command: RootCommand): command is "add" | "list" | "open" | "close" | "refresh" | "archive" | "unarchive" | "label" | "profile" | "remove" | "merge" | "send" | "tab" | "reorder" | "prune" | "restore" {
   return command === "add"
     || command === "list"
     || command === "open"
@@ -181,6 +183,7 @@ function isWorktreeCommand(command: RootCommand): command is "add" | "list" | "o
     || command === "merge"
     || command === "send"
     || command === "tab"
+    || command === "reorder"
     || command === "prune"
     || command === "restore";
 }

@@ -44,7 +44,7 @@ function createWorktree(branch: string, overrides: Partial<WorktreeInfo> = {}): 
 }
 
 function createRow(worktree: WorktreeInfo, depth = 0): WorktreeListRow {
-  return { worktree, depth };
+  return { worktree, depth, parentBranch: null };
 }
 
 describe("WorktreeList", () => {

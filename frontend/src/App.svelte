@@ -50,10 +50,12 @@
     saveUseWebChatUi,
   } from "./lib/utils";
   import {
+    applyBranchOrder,
     buildWorktreeListRows,
     countArchivedMatches,
     filterWorktrees,
     matchesWorktreeSearch,
+    moveBranchInOrder,
   } from "./lib/worktree-list";
   import { getTheme } from "./lib/themes";
   import type { ThemeKey } from "./lib/themes";
@@ -69,6 +71,7 @@
     selectWorktreeTab,
     setWorktreeLabel,
     setWorktreeProfile,
+    setWorktreeOrder,
     subscribeNotifications,
   } from "./lib/api";
   import TabBar from "./lib/TabBar.svelte";
@@ -915,6 +918,24 @@
     }
   }
 
+  async function reorderWorktree(
+    draggedBranch: string,
+    targetBranch: string,
+    position: "before" | "after",
+  ): Promise<void> {
+    const order = moveBranchInOrder({ worktrees, draggedBranch, targetBranch, position });
+    if (!order) return;
+
+    const previous = worktrees;
+    worktrees = applyBranchOrder(worktrees, order);
+    try {
+      await setWorktreeOrder(order);
+    } catch (err) {
+      worktrees = previous;
+      showToast({ tone: "error", message: `Failed to reorder: ${errorMessage(err)}` });
+    }
+  }
+
   async function closeWorktree(branch: string): Promise<void> {
     selectNeighborOf(branch);
     try {
@@ -1272,6 +1293,7 @@
         oneditprofile={openProfileDialog}
         oncreatesubworktree={openSubworktreeDialog}
         onposttolinear={handlePostToLinear}
+        onreorder={reorderWorktree}
       />
       {#if config.projectDir}
         <SidebarRepoRow

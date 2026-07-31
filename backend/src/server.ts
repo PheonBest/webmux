@@ -21,6 +21,7 @@ import {
   SetWorktreeArchivedRequestSchema,
   SetWorktreeLabelRequestSchema,
   SetWorktreeProfileRequestSchema,
+  SetWorktreeOrderRequestSchema,
   ToggleEnabledRequestSchema,
   UpsertCustomAgentRequestSchema,
   WorktreeNameParamsSchema,
@@ -205,6 +206,7 @@ const PROJECT_DIR = runtime.projectDir;
 const config: ProjectConfig = runtime.config;
 const git = runtime.git;
 const archiveStateService = runtime.archiveStateService;
+const orderStateService = runtime.orderStateService;
 const tmux = runtime.tmux;
 const projectRuntime = runtime.projectRuntime;
 const worktreeCreationTracker = runtime.worktreeCreationTracker;
@@ -667,6 +669,7 @@ async function readProjectSnapshot(): Promise<ProjectSnapshot> {
     : Promise.resolve({ ok: true as const, data: [] });
   await reconciliationService.reconcile(PROJECT_DIR);
   const archiveState = await archiveStateService.prune(projectRuntime.listWorktrees().map((worktree) => worktree.path));
+  const orderState = await orderStateService.prune(projectRuntime.listWorktrees().map((worktree) => worktree.branch));
   const linearResult = await linearIssuesPromise;
   const archivedPaths = buildArchivedWorktreePathSet(archiveState);
   const linearIssues = linearResult.ok ? linearResult.data : [];
@@ -676,6 +679,7 @@ async function readProjectSnapshot(): Promise<ProjectSnapshot> {
     runtime: projectRuntime,
     creatingWorktrees: worktreeCreationTracker.list(),
     notifications: runtimeNotifications.list(),
+    order: orderState.branches,
     isArchived: (path) => archivedPaths.has(normalizeArchivePath(path)),
     findLinearIssue: (branch) => {
       const match = linearIssues.find((issue) => branchMatchesIssue(branch, issue.branchName));
@@ -1477,6 +1481,15 @@ async function apiSetWorktreeProfile(name: string, req: Request): Promise<Respon
   return jsonResponse({ ok: true, profile: result.profile, restarted: result.restarted });
 }
 
+async function apiSetWorktreeOrder(req: Request): Promise<Response> {
+  const parsed = await parseJsonBody(req, SetWorktreeOrderRequestSchema);
+  if (!parsed.ok) return parsed.response;
+
+  log.info(`[worktree:order] branches=${parsed.data.branches.length}`);
+  const state = await orderStateService.setOrder(parsed.data.branches);
+  return jsonResponse({ ok: true, branches: state.branches });
+}
+
 async function apiSendPrompt(name: string, req: Request): Promise<Response> {
   ensureBranchNotBusy(name);
   const parsed = await parseJsonBody(req, SendWorktreePromptRequestSchema);
@@ -2005,6 +2018,10 @@ function parseAgentIdParam(params: Record<string, string>):
     [apiPaths.fetchWorktrees]: {
       GET: () => catching("GET /api/worktrees", () => apiGetWorktrees()),
       POST: (req) => catching("POST /api/worktrees", () => apiCreateWorktree(req)),
+    },
+
+    [apiPaths.setWorktreeOrder]: {
+      PUT: (req) => catching("PUT /api/worktrees/order", () => apiSetWorktreeOrder(req)),
     },
 
     [apiPaths.removeWorktree]: {

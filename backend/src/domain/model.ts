@@ -3,6 +3,7 @@ import type { AgentId, AgentKind, RuntimeKind } from "./config";
 export const WORKTREE_META_SCHEMA_VERSION = 1;
 export const WORKTREE_ARCHIVE_STATE_VERSION = 1;
 export const OPEN_SESSIONS_STATE_VERSION = 1;
+export const WORKTREE_ORDER_STATE_VERSION = 1;
 
 export type WorktreeConversationProvider = "codexAppServer" | "claudeCode" | "opencodeServer";
 
@@ -125,6 +126,11 @@ export interface WorktreeArchiveState {
 export interface OpenSessionsState {
   schemaVersion: number;
   savedAt: string;
+  branches: string[];
+}
+
+export interface WorktreeOrderState {
+  schemaVersion: number;
   branches: string[];
 }
 

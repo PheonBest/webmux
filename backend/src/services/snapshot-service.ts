@@ -1,6 +1,7 @@
 import type { CreatingWorktreeState, PrEntry, ProjectSnapshot, WorktreeSnapshot } from "../domain/model";
 import { compareWorktreeOrder, type WorktreeOrderFields } from "../domain/policies";
 import type { RuntimeNotification } from "./notification-service";
+import { buildWorktreeOrderComparator } from "./order-service";
 import { ProjectRuntime } from "./project-runtime";
 
 function formatElapsedSince(startedAt: string | null, now: () => Date): string {
@@ -123,6 +124,7 @@ interface BuildWorktreeSnapshotsInput {
   isArchived?: (path: string) => boolean;
   findLinearIssue?: (branch: string) => WorktreeSnapshot["linearIssue"];
   findAgentLabel?: (agentId: string | null) => string | null;
+  order?: string[];
   now?: () => Date;
 }
 
@@ -150,7 +152,18 @@ export function buildWorktreeSnapshots(input: BuildWorktreeSnapshotsInput): Work
     }
   }
 
-  worktrees.sort((left, right) => compareWorktreeOrder(orderFieldsOf(left), orderFieldsOf(right)));
+  const savedOrder = input.order ?? [];
+  if (savedOrder.length > 0) {
+    // A user has manually reordered the sidebar via drag-and-drop — that persisted
+    // order wins outright. Branches not yet in the saved order (e.g. freshly
+    // created) are appended alphabetically by buildWorktreeOrderComparator.
+    const compareByOrder = buildWorktreeOrderComparator(savedOrder);
+    worktrees.sort((left, right) => compareByOrder(left.branch, right.branch));
+  } else {
+    // No custom order saved yet — fall back to the smart default: open worktrees
+    // first, then closed ones ranked by how much attention their PR still needs.
+    worktrees.sort((left, right) => compareWorktreeOrder(orderFieldsOf(left), orderFieldsOf(right)));
+  }
 
   return worktrees;
 }
