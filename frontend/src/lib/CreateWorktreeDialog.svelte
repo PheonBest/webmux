@@ -229,6 +229,7 @@
   function openExistingBranchSelector(): void {
     mode = "existing";
     branchListMode = "existing";
+    setMultiAgentMode(false);
     if (!selectedExistingBranch && initialBranch.trim().length > 0) {
       selectedExistingBranch = initialBranch.trim();
     }
@@ -237,6 +238,7 @@
   function openDirectBranchSelector(): void {
     mode = "direct";
     branchListMode = "direct";
+    setMultiAgentMode(false);
     if (!selectedExistingBranch && initialBranch.trim().length > 0) {
       selectedExistingBranch = initialBranch.trim();
     }
@@ -446,11 +448,19 @@
     <div class="mb-4">
       <div class="mb-2 flex items-center justify-between gap-2">
         <span class="text-xs text-muted">{multiAgentMode ? `Agents (${selectedAgentIds.length} selected)` : "Agent"}</span>
-        <label class="flex items-center gap-2 text-[11px] text-muted cursor-pointer">
+        <label
+          class="flex items-center gap-2 text-[11px] text-muted"
+          class:cursor-pointer={mode === "new"}
+          class:opacity-50={mode !== "new"}
+          title={mode !== "new"
+            ? "Multiple agents each need their own new branch — not available when using an existing branch or running directly on one."
+            : undefined}
+        >
           <span>Multiple selection</span>
           <Toggle
             size="sm"
             checked={multiAgentMode}
+            disabled={mode !== "new"}
             ontoggle={setMultiAgentMode}
             aria-label="Enable multiple agent selection"
           />

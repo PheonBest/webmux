@@ -1014,8 +1014,15 @@ export class LifecycleService {
     // artifacts written into the main repo by a previous direct session — don't
     // block this switch; only real uncommitted work to tracked files does.
     if (this.deps.git.hasUncommittedTrackedChanges(projectRoot)) {
+      const currentBranch = this.deps.git.currentBranch(projectRoot);
+      const trackedChanges = this.deps.git.readStatus(projectRoot)
+        .split("\n")
+        .filter((line) => line.length > 0 && !line.startsWith("??"));
+      const changesSummary = trackedChanges.length > 0
+        ? `:\n${trackedChanges.slice(0, 10).join("\n")}${trackedChanges.length > 10 ? `\n… and ${trackedChanges.length - 10} more` : ""}`
+        : ".";
       throw new LifecycleError(
-        `Cannot switch the main repo to '${targetBranch}' — it has uncommitted changes. Commit or stash them first.`,
+        `Cannot switch the main repo from '${currentBranch || "(detached HEAD)"}' to '${targetBranch}' — it has uncommitted changes${changesSummary} Commit or stash them first.`,
         409,
       );
     }

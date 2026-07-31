@@ -97,19 +97,43 @@ describe("CreateWorktreeDialog — direct mode", () => {
     expect(screen.getByRole("button", { name: "Create" })).not.toBeDisabled();
   });
 
-  it("falls back to new-branch mode if multiple agents get selected while in direct mode", async () => {
+  it("disables multiple agent selection while in direct mode", async () => {
     renderDialog();
 
     await fireEvent.click(screen.getByText("Run directly on branch (no worktree)"));
-    await fireEvent.click(screen.getByText("main"));
 
+    // A direct session can only ever have one agent (there's only one
+    // checkout to run it in) — the toggle must be unusable, not just
+    // reactively undone after the fact, so users don't land in a state
+    // where their branch/mode choice silently reverted.
+    expect(screen.getByLabelText("Enable multiple agent selection")).toBeDisabled();
+  });
+
+  it("disables multiple agent selection while in existing-branch mode", async () => {
+    renderDialog();
+
+    await fireEvent.click(screen.getByText("Use existing branch"));
+
+    expect(screen.getByLabelText("Enable multiple agent selection")).toBeDisabled();
+  });
+
+  it("turns off multiple agent selection when switching to direct mode", async () => {
+    renderDialog();
+
+    // Multi-select on with only one agent actually checked: the "run
+    // directly"/"use existing" links are still offered at this point (they
+    // only hide once a *second* agent is picked), which is exactly the path
+    // that used to silently bounce the whole dialog back to "new" mode.
     await fireEvent.click(screen.getByLabelText("Enable multiple agent selection"));
-    await fireEvent.click(screen.getByText("Codex").closest("label")!.querySelector("input")!);
+    expect(screen.getByText("Agents (1 selected)")).toBeInTheDocument();
 
-    // Selecting a second agent while in direct mode should bounce back to
-    // "new" mode — a direct session can only ever have one agent. The direct
-    // branch selector is gone, replaced by the new-branch/multi-agent UI.
-    expect(screen.queryByText("Branch to run directly on")).not.toBeInTheDocument();
-    expect(screen.getByText("A separate prefixed branch will be created for each selected agent.")).toBeInTheDocument();
+    await fireEvent.click(screen.getByText("Run directly on branch (no worktree)"));
+
+    // Switching to direct mode turns multi-select back off instead of
+    // bouncing the whole dialog back to "new" behind the user's back — the
+    // branch/mode they chose sticks, and the toggle is now disabled too.
+    expect(screen.getByText("Agent")).toBeInTheDocument();
+    expect(screen.getByText("Branch to run directly on")).toBeInTheDocument();
+    expect(screen.getByLabelText("Enable multiple agent selection")).toBeDisabled();
   });
 });
