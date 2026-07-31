@@ -28,9 +28,10 @@ function buildDockerRuntimeBootstrap(runtimeEnvPath: string): string {
 /** opencode has no `--dangerously-skip-permissions`-style CLI flag (tracked upstream,
  *  still unresolved as of this integration) — its permission model is config/env
  *  driven instead. `OPENCODE_PERMISSION` is the documented escape hatch: a JSON
- *  map of tool -> "allow"/"ask"/"deny" read at startup, so "yolo" here means
- *  exporting a blanket allow instead of passing a flag. */
-const OPENCODE_YOLO_PERMISSION_JSON = JSON.stringify({ edit: "allow", bash: "allow", webfetch: "allow" });
+ *  map of tool-name pattern -> "allow"/"ask"/"deny" (wildcards supported, e.g. `"*"`),
+ *  matching the same shape as `permission` in `opencode.json`. "yolo" here means a
+ *  blanket `"*": "allow"` instead of passing a flag. */
+const OPENCODE_YOLO_PERMISSION_JSON = JSON.stringify({ "*": "allow" });
 
 function buildBuiltInAgentInvocation(input: {
   agent: "claude" | "codex" | "opencode";
