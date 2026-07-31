@@ -71,6 +71,11 @@ export interface WorktreeMeta {
   allocatedPorts: Record<string, number>;
   source?: WorktreeSource;
   oneshot?: OneshotMeta;
+  /** True when this session runs directly on the main repo's own working
+   *  directory (CreateWorktreeMode "direct") instead of a separate `git
+   *  worktree`. Only one direct session can exist at a time — see
+   *  worktree-service.ts / lifecycle-service.ts for the invariants. */
+  direct?: boolean;
   conversation?: WorktreeConversationMeta | null;
   agentTerminalStale?: boolean;
   /** Agent-pane tabs. `tabs[0]` is always the root. Absent on worktrees created
@@ -212,6 +217,7 @@ export interface CreatingWorktreeState {
   agentName: AgentId | null;
   phase: WorktreeCreationPhase;
   source: WorktreeSource;
+  direct: boolean;
 }
 
 export interface WorktreeCreationSnapshot {
@@ -228,6 +234,7 @@ export interface ManagedWorktreeRuntimeState {
   agentName: AgentId | null;
   source: WorktreeSource;
   oneshot: OneshotMeta | null;
+  direct: boolean;
   agentTerminalStale: boolean;
   tabs: WorktreeTab[];
   activeTabId: string | null;
@@ -272,6 +279,9 @@ export interface WorktreeSnapshot {
   oneshot: OneshotMeta | null;
   tabs: WorktreeTab[];
   activeTabId: string | null;
+  /** True when this session runs directly on the main repo's own working
+   *  directory instead of a separate `git worktree` (mode "direct"). */
+  direct: boolean;
 }
 
 export interface ProjectSnapshot {

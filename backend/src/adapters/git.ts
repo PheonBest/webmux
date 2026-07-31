@@ -9,7 +9,13 @@ export interface GitWorktreeEntry {
   bare: boolean;
 }
 
-export type CreateWorktreeMode = "new" | "existing";
+/** "direct" runs an agent directly on a branch inside the main repo's own
+ *  working directory — `worktreePath` equals `repoRoot`, no `git worktree add`
+ *  is ever issued, and the checkout uses plain `git checkout` guarded by a
+ *  dirty-tree check. This is the invariant the rest of the stack (worktree
+ *  removal, storage-dir resolution, "one direct session at a time") relies on:
+ *  a direct session is exactly one whose worktreePath === repoRoot. */
+export type CreateWorktreeMode = "new" | "existing" | "direct";
 
 interface BaseCreateGitWorktreeOptions {
   repoRoot: string;
@@ -27,7 +33,17 @@ export interface CreateExistingGitWorktreeOptions extends BaseCreateGitWorktreeO
   startPoint?: string;
 }
 
-export type CreateGitWorktreeOptions = CreateNewGitWorktreeOptions | CreateExistingGitWorktreeOptions;
+export interface CreateDirectGitWorktreeOptions extends BaseCreateGitWorktreeOptions {
+  mode: "direct";
+  /** Set when the branch only exists on a remote — checkout creates a local
+   *  tracking branch from this ref instead of a plain `git checkout <branch>`. */
+  startPoint?: string;
+}
+
+export type CreateGitWorktreeOptions =
+  | CreateNewGitWorktreeOptions
+  | CreateExistingGitWorktreeOptions
+  | CreateDirectGitWorktreeOptions;
 
 export interface RemoveGitWorktreeOptions {
   repoRoot: string;
@@ -71,6 +87,10 @@ export interface GitGateway {
   listLocalBranches(cwd: string): string[];
   listRemoteBranches(cwd: string): string[];
   readWorktreeStatus(cwd: string): GitWorktreeStatus;
+  /** Staged/unstaged changes to tracked files only — untracked files don't
+   *  count. Used to guard mode "direct" branch switches against clobbering
+   *  real uncommitted work (see hasUncommittedTrackedChanges). */
+  hasUncommittedTrackedChanges(cwd: string): boolean;
   readStatus(cwd: string): string;
   createWorktree(opts: CreateGitWorktreeOptions): void;
   removeWorktree(opts: RemoveGitWorktreeOptions): void;
@@ -301,6 +321,16 @@ export function listRemoteGitBranches(cwd: string): string[] {
     .filter((name) => name !== "HEAD" && name !== "origin");
 }
 
+/** True when `cwd` has staged or unstaged changes to tracked files. Untracked
+ *  files are deliberately excluded — they don't block `git checkout` and
+ *  shouldn't block mode "direct"'s dirty-repo guard either. */
+export function hasUncommittedTrackedChanges(cwd: string): boolean {
+  const output = runGit(["status", "--short", "--untracked-files=all"], cwd);
+  return output
+    .split("\n")
+    .some((line) => line.length > 0 && !line.startsWith("??"));
+}
+
 export function readGitWorktreeStatus(cwd: string): GitWorktreeStatus {
   const dirtyOutput = runGit(["status", "--porcelain"], cwd);
   const commit = tryRunGit(["rev-parse", "HEAD"], cwd);
@@ -322,6 +352,13 @@ export function removeGitWorktree(
   opts: RemoveGitWorktreeOptions,
   deps: RemoveGitWorktreeDeps = {},
 ): void {
+  // A "direct" session's worktreePath IS repoRoot — it was never registered
+  // via `git worktree add`, so there is nothing for `git worktree remove` to
+  // do (and git refuses to remove the main worktree anyway). No-op.
+  if (resolve(opts.worktreePath) === resolve(opts.repoRoot)) {
+    return;
+  }
+
   const args = ["worktree", "remove"];
   if (opts.force) args.push("--force");
   args.push(opts.worktreePath);
@@ -377,11 +414,33 @@ export class BunGitGateway implements GitGateway {
     return readGitWorktreeStatus(cwd);
   }
 
+  hasUncommittedTrackedChanges(cwd: string): boolean {
+    return hasUncommittedTrackedChanges(cwd);
+  }
+
   readStatus(cwd: string): string {
     return runGit(["status", "--short", "--untracked-files=all"], cwd);
   }
 
   createWorktree(opts: CreateGitWorktreeOptions): void {
+    if (opts.mode === "direct") {
+      // Untracked files (e.g. webmux's own `.claude/`/`.codex/` agent-runtime
+      // artifacts, written straight into the main repo for a direct session)
+      // don't block `git checkout` and shouldn't block switching branches
+      // here either — only actual tracked changes (staged or unstaged) count
+      // as "dirty" for this guard.
+      if (hasUncommittedTrackedChanges(opts.repoRoot)) {
+        throw new Error(
+          `Cannot check out '${opts.branch}' directly in the main repo — it has uncommitted changes. Commit or stash them first.`,
+        );
+      }
+      const checkoutArgs = opts.startPoint
+        ? ["checkout", "-b", opts.branch, opts.startPoint]
+        : ["checkout", opts.branch];
+      runGit(checkoutArgs, opts.repoRoot);
+      return;
+    }
+
     const args = ["worktree", "add"];
     if (opts.mode === "new") {
       args.push("-b", opts.branch, opts.worktreePath);

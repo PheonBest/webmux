@@ -130,6 +130,9 @@ export interface WorktreeInfo {
   oneshot: OneshotConfig | null;
   tabs: WorktreeTab[];
   activeTabId: string | null;
+  /** True when this session runs directly on the main repo's own working
+   *  directory (mode "direct") instead of a separate `git worktree`. */
+  direct: boolean;
 }
 
 export interface WorktreeListRow {

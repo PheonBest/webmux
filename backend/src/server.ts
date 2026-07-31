@@ -630,8 +630,17 @@ async function hasValidControlToken(req: Request): Promise<boolean> {
 async function getWorktreeGitDirs(): Promise<Map<string, string>> {
   const gitDirs = new Map<string, string>();
   const projectRoot = resolve(PROJECT_DIR);
+  const rootGitDir = git.resolveWorktreeGitDir(projectRoot);
+  // The main repo root is normally excluded (it's not a worktree) — except
+  // when it hosts a "direct" (no-worktree) session, in which case its PRs
+  // should sync just like any other managed branch.
+  const rootMeta = await readWorktreeMeta(rootGitDir);
   for (const entry of git.listLiveWorktrees(projectRoot)) {
-    if (entry.bare || resolve(entry.path) === projectRoot || !entry.branch) continue;
+    if (entry.bare || !entry.branch) continue;
+    if (resolve(entry.path) === projectRoot) {
+      if (rootMeta?.direct === true) gitDirs.set(entry.branch, rootGitDir);
+      continue;
+    }
     gitDirs.set(entry.branch, git.resolveWorktreeGitDir(entry.path));
   }
   return gitDirs;
@@ -1243,11 +1252,11 @@ async function apiCreateWorktree(req: Request): Promise<Response> {
     return errorResponse("Invalid base branch name", 400);
   }
 
-  if (createLinearTicket && mode === "existing") {
+  if (createLinearTicket && (mode === "existing" || mode === "direct")) {
     return errorResponse("Linear ticket creation is only supported for new branches", 400);
   }
 
-  if (baseBranch && mode === "existing") {
+  if (baseBranch && (mode === "existing" || mode === "direct")) {
     return errorResponse("Base branch is only supported for new branches", 400);
   }
 

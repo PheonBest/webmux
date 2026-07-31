@@ -105,6 +105,7 @@ interface ReconciledWorktreeState {
   oneshot: OneshotMeta | null;
   tabs: WorktreeTab[];
   activeTabId: string | null;
+  direct: boolean;
   git: {
     dirty: boolean;
     aheadCount: number;
@@ -167,8 +168,27 @@ export class ReconciliationService {
 
     const seenWorktreeIds = new Set<string>();
 
+    // The main repo root is normally not a "worktree" and is excluded — except
+    // when it hosts a "direct" session (mode "direct": an agent running on a
+    // branch in the main repo's own checkout, no `git worktree` involved). In
+    // that case its meta.json (under repoRoot/.git/webmux/) carries `direct:
+    // true`, and git already lists the main checkout as the first entry of
+    // `git worktree list`, so we just stop filtering it out.
+    const isDirectRootSession = await (async () => {
+      try {
+        const rootGitDir = this.deps.git.resolveWorktreeGitDir(normalizedRepoRoot);
+        const rootMeta = await readWorktreeMeta(rootGitDir);
+        return rootMeta?.direct === true;
+      } catch {
+        // Some GitGateway implementations (and test doubles) only resolve
+        // gitDirs for entries they were told about; failing to resolve the
+        // root's gitDir just means "no direct session" here.
+        return false;
+      }
+    })();
+
     const candidateEntries = worktrees.filter((entry) =>
-      !entry.bare && resolve(entry.path) !== normalizedRepoRoot
+      !entry.bare && (resolve(entry.path) !== normalizedRepoRoot || isDirectRootSession)
     );
     const reconciledStates = await mapWithConcurrency(candidateEntries, this.concurrency, async (entry) => {
       const gitDir = this.deps.git.resolveWorktreeGitDir(entry.path);
@@ -192,6 +212,7 @@ export class ReconciliationService {
         oneshot: meta?.oneshot ?? null,
         tabs: meta?.tabs ?? [],
         activeTabId: meta?.activeTabId ?? null,
+        direct: meta?.direct === true,
         git: {
           dirty: gitStatus.dirty,
           aheadCount: gitStatus.aheadCount,
@@ -234,6 +255,7 @@ export class ReconciliationService {
         oneshot: state.oneshot,
         tabs: state.tabs,
         activeTabId: state.activeTabId,
+        direct: state.direct,
       });
 
       this.deps.runtime.setGitState(state.worktreeId, {

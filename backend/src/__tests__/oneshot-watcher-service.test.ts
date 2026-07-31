@@ -46,6 +46,7 @@ function makeWorktree(overrides: {
     prs: overrides.prs ?? [],
     tabs: [],
     activeTabId: null,
+    direct: false,
   };
 }
 

@@ -1511,7 +1511,9 @@
 
 {#if removeBranch}
   <ConfirmDialog
-    message={`Remove worktree "${removeBranch}"? This action cannot be undone.`}
+    message={worktrees.find((w) => w.branch === removeBranch)?.direct
+      ? `Close the direct session on "${removeBranch}"? The branch will NOT be deleted — it stays checked out in the main repo.`
+      : `Remove worktree "${removeBranch}"? This action cannot be undone.`}
     onconfirm={handleRemove}
     oncancel={() => (removeBranch = null)}
   />

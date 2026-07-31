@@ -31,6 +31,7 @@ function makeDefaultState(input: {
   oneshot?: OneshotMeta | null;
   tabs?: WorktreeTab[];
   activeTabId?: string | null;
+  direct?: boolean;
 }): ManagedWorktreeRuntimeState {
   return {
     worktreeId: input.worktreeId,
@@ -44,6 +45,7 @@ function makeDefaultState(input: {
     oneshot: input.oneshot ?? null,
     tabs: input.tabs ?? [],
     activeTabId: input.activeTabId ?? null,
+    direct: input.direct === true,
     agentTerminalStale: input.agentTerminalStale === true,
     git: {
       exists: true,
@@ -96,6 +98,7 @@ export class ProjectRuntime {
     oneshot?: OneshotMeta | null;
     tabs?: WorktreeTab[];
     activeTabId?: string | null;
+    direct?: boolean;
   }): ManagedWorktreeRuntimeState {
     const existing = this.worktrees.get(input.worktreeId);
     if (existing) {
@@ -112,6 +115,7 @@ export class ProjectRuntime {
       if (input.oneshot !== undefined) existing.oneshot = input.oneshot;
       if (input.tabs !== undefined) existing.tabs = input.tabs;
       if (input.activeTabId !== undefined) existing.activeTabId = input.activeTabId;
+      if (input.direct !== undefined) existing.direct = input.direct;
       existing.git.exists = true;
       existing.git.branch = input.branch;
       existing.session.windowName = buildWorktreeWindowName(input.branch);

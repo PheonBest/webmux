@@ -16,7 +16,7 @@ import {
   writeWorktreeMeta,
 } from "../adapters/fs";
 import type { WorktreeMeta } from "../domain/model";
-import { createManagedWorktree, initializeManagedWorktree } from "../services/worktree-service";
+import { createManagedWorktree, initializeManagedWorktree, removeManagedWorktree } from "../services/worktree-service";
 
 function run(args: string[], cwd: string): string {
   const result = Bun.spawnSync(args, { cwd, stdout: "pipe", stderr: "pipe" });
@@ -71,6 +71,10 @@ class FakeGitGateway implements GitGateway {
       aheadCount: 0,
       currentCommit: null,
     };
+  }
+
+  hasUncommittedTrackedChanges(): boolean {
+    return false;
   }
 
   readStatus(): string {
@@ -622,5 +626,107 @@ describe("initializeManagedWorktree", () => {
     expect(calls).toContain("killWindow:wm-project-12345678:wm-feature-tmux-rollback");
     expect(new BunGitGateway().listWorktrees(repoRoot).some((entry) => entry.path === worktreePath)).toBe(false);
     expect(run(["git", "branch", "--list", "feature-tmux-rollback"], repoRoot)).toBe("");
+  });
+
+  it("creates a direct session: worktreePath is repoRoot, no git worktree add, meta.direct is true", async () => {
+    repoRoot = await mkdtemp(join(tmpdir(), "webmux-create-direct-"));
+    run(["git", "init", "-b", "main"], repoRoot);
+    run(["git", "config", "user.name", "Test User"], repoRoot);
+    run(["git", "config", "user.email", "test@example.com"], repoRoot);
+    await Bun.write(join(repoRoot, "README.md"), "# repo\n");
+    run(["git", "add", "README.md"], repoRoot);
+    run(["git", "commit", "-m", "init"], repoRoot);
+    run(["git", "checkout", "-b", "feature-direct"], repoRoot);
+    run(["git", "checkout", "main"], repoRoot);
+
+    const result = await createManagedWorktree(
+      {
+        repoRoot,
+        worktreePath: repoRoot,
+        branch: "feature-direct",
+        mode: "direct",
+        profile: "default",
+        agent: "claude",
+        runtime: "host",
+        worktreeId: "wt_direct",
+      },
+      { git: new BunGitGateway() },
+    );
+
+    expect(run(["git", "branch", "--show-current"], repoRoot)).toBe("feature-direct");
+    // No linked worktree was registered — only the main checkout itself.
+    expect(new BunGitGateway().listWorktrees(repoRoot).length).toBe(1);
+    expect(result.meta.direct).toBe(true);
+    expect(result.meta.branch).toBe("feature-direct");
+    // Storage lives under the main repo's own .git dir, not a separate worktree dir.
+    expect(result.paths.gitDir).toBe(join(repoRoot, ".git"));
+
+    const meta = await readWorktreeMeta(join(repoRoot, ".git"));
+    expect(meta?.direct).toBe(true);
+  });
+
+  it("never deletes the branch on rollback for a direct session, even though it fails after checkout", async () => {
+    repoRoot = await mkdtemp(join(tmpdir(), "webmux-create-direct-rollback-"));
+    run(["git", "init", "-b", "main"], repoRoot);
+    run(["git", "config", "user.name", "Test User"], repoRoot);
+    run(["git", "config", "user.email", "test@example.com"], repoRoot);
+    await Bun.write(join(repoRoot, "README.md"), "# repo\n");
+    run(["git", "add", "README.md"], repoRoot);
+    run(["git", "commit", "-m", "init"], repoRoot);
+    run(["git", "checkout", "-b", "main-like-long-lived"], repoRoot);
+    run(["git", "checkout", "main"], repoRoot);
+
+    await expect(
+      createManagedWorktree(
+        {
+          repoRoot,
+          worktreePath: repoRoot,
+          branch: "main-like-long-lived",
+          mode: "direct",
+          profile: "default",
+          agent: "claude",
+          runtime: "host",
+          // Intentionally invalid pairing to force initializeManagedWorktree to throw
+          // *after* the checkout has already happened, exercising the rollback path.
+          controlUrl: "http://127.0.0.1:5111",
+        },
+        { git: new BunGitGateway() },
+      ),
+    ).rejects.toThrow("controlUrl and controlToken must be provided together");
+
+    // The branch must still exist — direct-mode rollback never deletes branches.
+    expect(run(["git", "branch", "--list", "main-like-long-lived"], repoRoot)).not.toBe("");
+    // The main checkout itself is untouched (still registered as a worktree).
+    expect(new BunGitGateway().listWorktrees(repoRoot).some((entry) => entry.path === repoRoot)).toBe(true);
+  });
+
+  it("removeManagedWorktree never deletes the branch for a direct session regardless of deleteBranch flags", async () => {
+    repoRoot = await mkdtemp(join(tmpdir(), "webmux-remove-direct-"));
+    run(["git", "init", "-b", "main"], repoRoot);
+    run(["git", "config", "user.name", "Test User"], repoRoot);
+    run(["git", "config", "user.email", "test@example.com"], repoRoot);
+    await Bun.write(join(repoRoot, "README.md"), "# repo\n");
+    run(["git", "add", "README.md"], repoRoot);
+    run(["git", "commit", "-m", "init"], repoRoot);
+    run(["git", "checkout", "-b", "feature-direct-remove"], repoRoot);
+
+    expect(() => {
+      removeManagedWorktree(
+        {
+          repoRoot,
+          worktreePath: repoRoot,
+          branch: "feature-direct-remove",
+          force: true,
+          // Even when a caller mistakenly asks for branch deletion, it must be ignored
+          // for a direct session (worktreePath === repoRoot).
+          deleteBranch: true,
+          deleteBranchForce: true,
+        },
+        new BunGitGateway(),
+      );
+    }).not.toThrow();
+
+    expect(run(["git", "branch", "--list", "feature-direct-remove"], repoRoot)).not.toBe("");
+    expect(new BunGitGateway().listWorktrees(repoRoot).some((entry) => entry.path === repoRoot)).toBe(true);
   });
 });

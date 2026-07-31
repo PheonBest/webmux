@@ -22,7 +22,11 @@ export const EnabledResponseSchema = z.object({
 export const BuiltInAgentIdSchema = z.enum(["claude", "codex"]);
 export const AgentIdSchema = z.string().trim().min(1);
 export const AgentKindSchema = BuiltInAgentIdSchema;
-export const WorktreeCreateModeSchema = z.enum(["new", "existing"]);
+// "direct" runs an agent directly on a branch in the main repo's own working
+// directory — no `git worktree` is created at all (see worktree-service.ts /
+// git.ts for the invariants this mode relies on: worktreePath === repoRoot,
+// only one direct session at a time, branch is never deleted on removal).
+export const WorktreeCreateModeSchema = z.enum(["new", "existing", "direct"]);
 
 export const LinearIssueIdSchema = z.string().regex(/^[A-Z]+-\d+$/, "Expected Linear issue id (e.g. ENG-123)");
 export const LinearTeamKeySchema = z.string().regex(/^[A-Z]+$/, "Expected Linear team key (e.g. ENG)");
@@ -378,6 +382,10 @@ export const ProjectWorktreeSnapshotSchema = z.object({
   /** Agent-pane tabs (`tabs[0]` is the root). Default keeps older servers valid. */
   tabs: z.array(WorktreeTabSchema).default([]),
   activeTabId: z.string().nullable().default(null),
+  /** True when this session runs directly on the main repo's own working
+   *  directory (mode "direct") rather than in a separate `git worktree`.
+   *  Default keeps older servers valid. */
+  direct: z.boolean().default(false),
 });
 
 export const ProjectSnapshotSchema = z.object({
