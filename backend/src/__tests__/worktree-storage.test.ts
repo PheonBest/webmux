@@ -129,6 +129,10 @@ class FakeGitGateway implements GitGateway {
   hardReset(_repoRoot: string, _ref: string): TryGitCommandResult {
     return { ok: true, stdout: "" };
   }
+
+  relocateUncommittedChangesToWorktree(): void {
+    // no-op for worktree-storage tests
+  }
 }
 
 class FakeTmuxGateway implements TmuxGateway {

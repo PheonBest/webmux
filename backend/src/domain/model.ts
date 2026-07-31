@@ -37,12 +37,21 @@ export type WorktreeConversationMeta =
   | ClaudeWorktreeConversationMeta
   | OpencodeWorktreeConversationMeta;
 
-export type WorktreeTabKind = "root" | "fork";
+export type WorktreeTabKind = "root" | "fork" | "agent-window";
 
 /** A claude/codex session shown as a tab above the agent terminal pane. The
  *  root tab is the original session; forks are `--fork-session` children of it.
  *  `paneId` is the live tmux pane id (`%N`) and is ephemeral — it is recaptured
- *  whenever the session is rematerialized. `sessionId`/`tabId`/`seq` are durable. */
+ *  whenever the session is rematerialized. `sessionId`/`tabId`/`seq` are durable.
+ *
+ *  `agent-window` tabs are a third kind, added for the "group multiple agents
+ *  into one workflow" feature (see WEBMUX_GROUP_MULTI_AGENT_SESSION in
+ *  lifecycle-service.ts): unlike `fork` (same agent, swapped pane, sharing the
+ *  worktree's single tmux window), an `agent-window` tab is a *different*
+ *  agent given its own real tmux window in the same tmux session
+ *  (`buildWorktreeWindowName(branch, agentId)`). Selecting it reconnects the
+ *  terminal WebSocket to that window instead of swapping panes — see
+ *  `windowName` below and `resolveTerminalWorktree` in server.ts. */
 export interface WorktreeTab {
   tabId: string;
   kind: WorktreeTabKind;
@@ -51,6 +60,14 @@ export interface WorktreeTab {
   sessionId: string | null;
   paneId?: string;
   createdAt: string;
+  /** Set on `agent-window` tabs: which agent runs in that window. Root/fork
+   *  tabs are implicitly the worktree's primary `WorktreeMeta.agent`. */
+  agentId?: AgentId;
+  /** Set on `agent-window` tabs: the real tmux window name
+   *  (`buildWorktreeWindowName(branch, agentId)`) backing this tab. Root/fork
+   *  tabs live in the worktree's primary window and don't need this — they're
+   *  addressed via pane-swap into that window's pane 0 instead. */
+  windowName?: string;
 }
 
 export type WorktreeSource = "ui" | "oneshot";

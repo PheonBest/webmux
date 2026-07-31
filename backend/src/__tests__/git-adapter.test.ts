@@ -9,6 +9,7 @@ import {
   listLocalGitBranches,
   parseGitWorktreePorcelain,
   readGitWorktreeStatus,
+  relocateUncommittedChangesToWorktree,
   removeGitWorktree,
   resolveWorktreeGitDir,
   resolveWorktreeRoot,
@@ -529,5 +530,89 @@ describe("removeGitWorktree", () => {
         },
       );
     }).toThrow("git worktree remove --force /repo/__worktrees/feature-a failed");
+  });
+});
+
+describe("relocateUncommittedChangesToWorktree", () => {
+  let repoRoot = "";
+
+  afterEach(async () => {
+    if (repoRoot) {
+      await rm(repoRoot, { recursive: true, force: true });
+      repoRoot = "";
+    }
+  });
+
+  async function initRepoWithUncommittedChanges(): Promise<string> {
+    const root = await mkdtemp(join(tmpdir(), "webmux-relocate-"));
+    run(["git", "init", "-b", "main"], root);
+    run(["git", "config", "user.name", "Test User"], root);
+    run(["git", "config", "user.email", "test@example.com"], root);
+    await Bun.write(join(root, "README.md"), "# repo\n");
+    run(["git", "add", "README.md"], root);
+    run(["git", "commit", "-m", "init"], root);
+    // A tracked-file change (not just an untracked file) — matches what
+    // hasUncommittedTrackedChanges guards against.
+    await Bun.write(join(root, "README.md"), "# repo\n\nwork in progress\n");
+    return root;
+  }
+
+  it("stashes, creates a worktree, and reapplies the changes there", async () => {
+    repoRoot = await initRepoWithUncommittedChanges();
+    const worktreePath = join(repoRoot, "__worktrees", "resolve-main-test");
+
+    relocateUncommittedChangesToWorktree({
+      repoRoot,
+      worktreePath,
+      branch: "resolve-main-test",
+      baseBranch: "main",
+    });
+
+    // The root's working tree is clean again (tracked changes moved out — an
+    // untracked __worktrees/ directory from creating the recovery worktree is
+    // expected and irrelevant here).
+    const trackedStatus = read(["git", "status", "--short"], repoRoot)
+      .split("\n")
+      .filter((line) => line.length > 0 && !line.startsWith("??"));
+    expect(trackedStatus).toEqual([]);
+    // The new worktree exists, is on the new branch, and has the change applied.
+    expect(new BunGitGateway().listWorktrees(repoRoot).some((entry) => entry.path === worktreePath)).toBe(true);
+    expect(read(["git", "branch", "--show-current"], worktreePath)).toBe("resolve-main-test");
+    const relocatedContent = await Bun.file(join(worktreePath, "README.md")).text();
+    expect(relocatedContent).toContain("work in progress");
+  });
+
+  it("throws instead of discarding when there are no uncommitted changes to relocate", async () => {
+    repoRoot = await mkdtemp(join(tmpdir(), "webmux-relocate-clean-"));
+    run(["git", "init", "-b", "main"], repoRoot);
+    run(["git", "config", "user.name", "Test User"], repoRoot);
+    run(["git", "config", "user.email", "test@example.com"], repoRoot);
+    await Bun.write(join(repoRoot, "README.md"), "# repo\n");
+    run(["git", "add", "README.md"], repoRoot);
+    run(["git", "commit", "-m", "init"], repoRoot);
+
+    expect(() =>
+      relocateUncommittedChangesToWorktree({
+        repoRoot,
+        worktreePath: join(repoRoot, "__worktrees", "resolve-main-test"),
+        branch: "resolve-main-test",
+        baseBranch: "main",
+      })
+    ).toThrow("No uncommitted changes to relocate");
+  });
+
+  it("leaves the stash recoverable when creating the recovery worktree fails", async () => {
+    repoRoot = await initRepoWithUncommittedChanges();
+    // baseBranch that doesn't exist makes `git worktree add` fail after the stash succeeded.
+    expect(() =>
+      relocateUncommittedChangesToWorktree({
+        repoRoot,
+        worktreePath: join(repoRoot, "__worktrees", "resolve-main-test"),
+        branch: "resolve-main-test",
+        baseBranch: "does-not-exist",
+      })
+    ).toThrow(/stash list/);
+
+    expect(read(["git", "stash", "list"], repoRoot)).toContain("webmux-relocate-resolve-main-test");
   });
 });

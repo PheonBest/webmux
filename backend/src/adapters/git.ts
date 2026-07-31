@@ -78,6 +78,18 @@ export interface RemoveGitWorktreeDeps {
   removeDirectory?: (path: string) => void;
 }
 
+export interface RelocateUncommittedChangesOptions {
+  /** The main repo root whose tracked-file changes are being relocated. */
+  repoRoot: string;
+  /** Where to create the new recovery worktree. */
+  worktreePath: string;
+  /** New branch name for the recovery worktree (see generateRecoveryBranchName). */
+  branch: string;
+  /** Branch the recovery worktree is checked out from — normally whatever was
+   *  live in `repoRoot` before the relocation. */
+  baseBranch: string;
+}
+
 export interface GitGateway {
   resolveRepoRoot(dir: string): string | null;
   resolveWorktreeRoot(cwd: string): string;
@@ -102,6 +114,9 @@ export interface GitGateway {
   fetchBranch(repoRoot: string, remote: string, branch: string): TryGitCommandResult;
   fastForwardMerge(repoRoot: string, ref: string): TryGitCommandResult;
   hardReset(repoRoot: string, ref: string): TryGitCommandResult;
+  /** Safely move `repoRoot`'s uncommitted tracked changes into a brand new
+   *  worktree, never discarding them. See relocateUncommittedChangesToWorktree. */
+  relocateUncommittedChangesToWorktree(opts: RelocateUncommittedChangesOptions): void;
 }
 
 function spawnGit(args: string[], cwd: string): { ok: true; result: Bun.SyncSubprocess<"pipe", "pipe"> } | { ok: false; stderr: string } {
@@ -381,6 +396,54 @@ export function removeGitWorktree(
   }
 }
 
+/** Safely relocate `opts.repoRoot`'s uncommitted TRACKED changes into a brand
+ *  new worktree, without ever discarding them if something goes wrong partway.
+ *  There is no single git command for "move my dirty working-directory state
+ *  to a different directory" — this composes three git-native, individually
+ *  safe/reversible steps:
+ *
+ *  1. `git stash push` in `repoRoot` — reversible; the stash entry is a normal
+ *     repo-wide ref, recoverable via `git stash list` regardless of what
+ *     happens next.
+ *  2. `git worktree add -b <branch> <worktreePath> <baseBranch>` — creates the
+ *     recovery worktree checked out to whatever branch was live in the root.
+ *  3. `git stash apply` *inside the new worktree* — stash entries are shared
+ *     across all worktrees of one repo, so this works from the new worktree's
+ *     cwd and never touches `repoRoot`'s disk state again.
+ *
+ *  If step 2 or 3 fails, the stash entry is deliberately left in place (never
+ *  popped/dropped) so `git stash list` in `repoRoot` still recovers it — this
+ *  function never falls back to discarding changes. */
+export function relocateUncommittedChangesToWorktree(opts: RelocateUncommittedChangesOptions): void {
+  const stashPush = tryRunGit(
+    ["stash", "push", "-m", `webmux-relocate-${opts.branch}`],
+    opts.repoRoot,
+  );
+  if (!stashPush.ok) {
+    throw new Error(`Failed to stash uncommitted changes in ${opts.repoRoot}: ${stashPush.stderr}`);
+  }
+  if (/no local changes to save/i.test(stashPush.stdout)) {
+    throw new Error(`No uncommitted changes to relocate in ${opts.repoRoot}`);
+  }
+
+  const worktreeAdd = tryRunGit(
+    ["worktree", "add", "-b", opts.branch, opts.worktreePath, opts.baseBranch],
+    opts.repoRoot,
+  );
+  if (!worktreeAdd.ok) {
+    throw new Error(
+      `Stashed uncommitted changes (recoverable via 'git stash list' in ${opts.repoRoot}) but failed to create the recovery worktree at ${opts.worktreePath}: ${worktreeAdd.stderr}`,
+    );
+  }
+
+  const stashApply = tryRunGit(["stash", "apply", "stash@{0}"], opts.worktreePath);
+  if (!stashApply.ok) {
+    throw new Error(
+      `Created recovery worktree at ${opts.worktreePath} but failed to apply the stashed changes there (the stash is still recoverable via 'git stash list' in ${opts.repoRoot}): ${stashApply.stderr}`,
+    );
+  }
+}
+
 export class BunGitGateway implements GitGateway {
   resolveRepoRoot(dir: string): string | null {
     return resolveRepoRoot(dir);
@@ -539,5 +602,9 @@ export class BunGitGateway implements GitGateway {
 
   hardReset(repoRoot: string, ref: string): TryGitCommandResult {
     return tryRunGit(["reset", "--hard", ref], repoRoot);
+  }
+
+  relocateUncommittedChangesToWorktree(opts: RelocateUncommittedChangesOptions): void {
+    relocateUncommittedChangesToWorktree(opts);
   }
 }

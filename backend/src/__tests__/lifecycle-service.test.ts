@@ -334,7 +334,16 @@ describe("LifecycleService", () => {
 
   afterEach(async () => {
     await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+    delete Bun.env.WEBMUX_GROUP_MULTI_AGENT_SESSION;
   });
+
+  /** Legacy N-separate-branches multi-agent behavior only runs with the
+   *  WEBMUX_GROUP_MULTI_AGENT_SESSION flag explicitly disabled — it defaults
+   *  to on (grouped single-workflow) as of the "group multiple agents into
+   *  one workflow" feature. */
+  function useLegacyMultiAgentBranches(): void {
+    Bun.env.WEBMUX_GROUP_MULTI_AGENT_SESSION = "false";
+  }
 
   async function initRepo(): Promise<string> {
     const repoRoot = await mkdtemp(join(tmpdir(), "webmux-lifecycle-"));
@@ -351,14 +360,27 @@ describe("LifecycleService", () => {
     return repoRoot;
   }
 
-  it("builds original and agent-prefixed targets from selected agents", () => {
+  it("builds original and agent-prefixed targets from selected agents (legacy mode)", () => {
+    expect(buildCreateWorktreeTargets("feature/search", ["claude"], false)).toEqual([
+      { branch: "feature/search", agent: "claude" },
+    ]);
+    expect(buildCreateWorktreeTargets("feature/search", ["claude", "codex", "gemini"], false)).toEqual([
+      { branch: "claude-feature/search", agent: "claude" },
+      { branch: "codex-feature/search", agent: "codex" },
+      { branch: "gemini-feature/search", agent: "gemini" },
+    ]);
+  });
+
+  it("groups multiple agents into a single target by default (grouped mode)", () => {
     expect(buildCreateWorktreeTargets("feature/search", ["claude"])).toEqual([
       { branch: "feature/search", agent: "claude" },
     ]);
     expect(buildCreateWorktreeTargets("feature/search", ["claude", "codex", "gemini"])).toEqual([
-      { branch: "claude-feature/search", agent: "claude" },
-      { branch: "codex-feature/search", agent: "codex" },
-      { branch: "gemini-feature/search", agent: "gemini" },
+      { branch: "feature/search", agent: "claude" },
+    ]);
+    // Explicit true is equivalent to the default.
+    expect(buildCreateWorktreeTargets("feature/search", ["claude", "codex"], true)).toEqual([
+      { branch: "feature/search", agent: "claude" },
     ]);
   });
 
@@ -457,7 +479,8 @@ describe("LifecycleService", () => {
     expect(await Bun.file(paths.runtimeEnvPath).exists()).toBe(true);
   });
 
-  it("creates one managed worktree per selected agent from one task branch", async () => {
+  it("creates one managed worktree per selected agent from one task branch (legacy flag off)", async () => {
+    useLegacyMultiAgentBranches();
     const repoRoot = await initRepo();
     const runtime = new ProjectRuntime();
     const tmux = new FakeTmuxGateway();
@@ -493,7 +516,8 @@ describe("LifecycleService", () => {
     ]);
   });
 
-  it("rolls back the first paired worktree when the second branch cannot be created", async () => {
+  it("rolls back the first paired worktree when the second branch cannot be created (legacy flag off)", async () => {
+    useLegacyMultiAgentBranches();
     const repoRoot = await initRepo();
     const runtime = new ProjectRuntime();
     const tmux = new FakeTmuxGateway();
@@ -516,7 +540,8 @@ describe("LifecycleService", () => {
     )).toBe(false);
   });
 
-  it("rejects invalid multi-agent selections", async () => {
+  it("rejects multiple agents for existing/direct mode only under the legacy flag", async () => {
+    useLegacyMultiAgentBranches();
     const repoRoot = await initRepo();
     const runtime = new ProjectRuntime();
     const tmux = new FakeTmuxGateway();
@@ -527,6 +552,13 @@ describe("LifecycleService", () => {
       mode: "existing",
       agents: ["claude", "codex"],
     })).rejects.toThrow("Creating multiple agents is only supported for new worktrees");
+  });
+
+  it("rejects invalid multi-agent selections", async () => {
+    const repoRoot = await initRepo();
+    const runtime = new ProjectRuntime();
+    const tmux = new FakeTmuxGateway();
+    const lifecycle = makeLifecycleService(repoRoot, tmux, runtime);
 
     await expect(lifecycle.createWorktrees({
       branch: "feature/search",
@@ -537,6 +569,60 @@ describe("LifecycleService", () => {
       branch: "feature/search",
       agents: ["missing"],
     })).rejects.toThrow("Unknown agent: missing");
+  });
+
+  it("groups multiple agents into one branch/worktree with one tmux window each (grouped default)", async () => {
+    const repoRoot = await initRepo();
+    const runtime = new ProjectRuntime();
+    const tmux = new FakeTmuxGateway();
+    const lifecycle = makeLifecycleService(repoRoot, tmux, runtime);
+    const git = new BunGitGateway();
+
+    const created = await lifecycle.createWorktrees({
+      branch: "feature/search",
+      prompt: "fix the search flow",
+      agents: ["claude", "codex"],
+    });
+
+    // Exactly one branch/worktree, not the legacy claude-/codex- prefixed pair.
+    expect(created).toEqual({
+      primaryBranch: "feature/search",
+      branches: ["feature/search"],
+    });
+
+    const worktreePath = join(repoRoot, "__worktrees", "feature", "search");
+    const gitDir = git.resolveWorktreeGitDir(worktreePath);
+    const meta = await readWorktreeMeta(gitDir);
+    expect(meta?.agent).toBe("claude");
+
+    const agentWindowTab = meta?.tabs?.find((tab) => tab.kind === "agent-window");
+    expect(agentWindowTab).toBeDefined();
+    expect(agentWindowTab?.agentId).toBe("codex");
+    expect(agentWindowTab?.windowName).toBe(buildWorktreeWindowName("feature/search", "codex"));
+
+    // One tmux window for the primary agent, one more for the extra agent —
+    // both real windows within the same tmux session, not swapped panes.
+    expect(tmux.listWindows().map((window) => window.windowName).sort()).toEqual(
+      [buildWorktreeWindowName("feature/search"), buildWorktreeWindowName("feature/search", "codex")].sort(),
+    );
+    expect(runtime.getWorktreeByBranch("feature/search")?.session.exists).toBe(true);
+  });
+
+  it("addAgentWindow is idempotent for an agent that already has a window", async () => {
+    const repoRoot = await initRepo();
+    const runtime = new ProjectRuntime();
+    const tmux = new FakeTmuxGateway();
+    const lifecycle = makeLifecycleService(repoRoot, tmux, runtime);
+
+    await lifecycle.createWorktrees({
+      branch: "feature/search",
+      agents: ["claude", "codex"],
+    });
+    const windowCountAfterCreate = tmux.listWindows().length;
+
+    const { tab } = await lifecycle.addAgentWindow("feature/search", "codex");
+    expect(tab.agentId).toBe("codex");
+    expect(tmux.listWindows().length).toBe(windowCountAfterCreate);
   });
 
   it("refreshes runtime env after postCreate so system prompts see .env.local values", async () => {
@@ -1073,6 +1159,66 @@ describe("LifecycleService", () => {
       expect(run(["git", "branch", "--show-current"], repoRoot)).toBe("main");
     });
 
+    it("attaches a machine-readable code to the blocked-switch error", async () => {
+      const repoRoot = await initRepo();
+      const runtime = new ProjectRuntime();
+      const tmux = new FakeTmuxGateway();
+      const lifecycle = makeLifecycleService(repoRoot, tmux, runtime);
+
+      run(["git", "checkout", "-b", "release/dirty-target"], repoRoot);
+      run(["git", "checkout", "main"], repoRoot);
+      await Bun.write(join(repoRoot, "README.md"), "# repo\nuncommitted local change\n");
+
+      try {
+        await lifecycle.createWorktree({ mode: "direct", branch: "release/dirty-target" });
+        throw new Error("expected createWorktree to reject");
+      } catch (error) {
+        expect(error).toBeInstanceOf(LifecycleError);
+        expect((error as LifecycleError).code).toBe("direct_switch_dirty");
+      }
+    });
+
+    it("recoverDirectSwitchConflict relocates uncommitted changes into a new worktree and launches an agent", async () => {
+      const repoRoot = await initRepo();
+      const runtime = new ProjectRuntime();
+      const tmux = new FakeTmuxGateway();
+      const lifecycle = makeLifecycleService(repoRoot, tmux, runtime);
+
+      // The main repo is running a direct session on main with uncommitted changes.
+      await Bun.write(join(repoRoot, "README.md"), "# repo\nuncommitted local change\n");
+
+      const result = await lifecycle.recoverDirectSwitchConflict({ targetBranch: "release/dirty-target" });
+
+      expect(result.branch).toMatch(/^resolve-main-/);
+      // The root's tracked changes are gone — the change was relocated, not
+      // discarded (an untracked __worktrees/ dir from the new worktree is fine).
+      const trackedStatus = run(["git", "status", "--short"], repoRoot)
+        .split("\n")
+        .filter((line) => line.length > 0 && !line.startsWith("??"));
+      expect(trackedStatus).toEqual([]);
+
+      const worktreePath = join(repoRoot, "__worktrees", result.branch);
+      const relocatedContent = await Bun.file(join(worktreePath, "README.md")).text();
+      expect(relocatedContent).toContain("uncommitted local change");
+
+      // An agent session was launched in the new worktree.
+      expect(tmux.hasWindow(buildProjectSessionName(repoRoot), buildWorktreeWindowName(result.branch))).toBe(true);
+      const commands = tmux.commands.map((c) => c.command).join("\n");
+      expect(commands).toContain("release/dirty-target");
+      expect(commands).toContain("uncommitted changes blocking a direct-mode switch");
+    });
+
+    it("recoverDirectSwitchConflict throws when there is nothing to recover", async () => {
+      const repoRoot = await initRepo();
+      const runtime = new ProjectRuntime();
+      const tmux = new FakeTmuxGateway();
+      const lifecycle = makeLifecycleService(repoRoot, tmux, runtime);
+
+      await expect(
+        lifecycle.recoverDirectSwitchConflict({ targetBranch: "release/dirty-target" }),
+      ).rejects.toThrow(/no uncommitted changes/i);
+    });
+
     it("checks out over the previous direct session when starting a new one on a different branch", async () => {
       const repoRoot = await initRepo();
       const runtime = new ProjectRuntime();
@@ -1126,7 +1272,8 @@ describe("LifecycleService", () => {
       expect(new BunGitGateway().listWorktrees(repoRoot).some((entry) => entry.path === repoRoot)).toBe(true);
     });
 
-    it("rejects multiple agents for a direct session (only one checkout can exist)", async () => {
+    it("rejects multiple agents for a direct session only under the legacy flag (only one checkout can exist)", async () => {
+      useLegacyMultiAgentBranches();
       const repoRoot = await initRepo();
       const runtime = new ProjectRuntime();
       const tmux = new FakeTmuxGateway();
@@ -1137,6 +1284,29 @@ describe("LifecycleService", () => {
         mode: "direct",
         agents: ["claude", "codex"],
       })).rejects.toThrow("Creating multiple agents is only supported for new worktrees");
+    });
+
+    it("grouped mode allows multiple agents on a direct session — one branch, one window per agent", async () => {
+      const repoRoot = await initRepo();
+      const runtime = new ProjectRuntime();
+      const tmux = new FakeTmuxGateway();
+      const lifecycle = makeLifecycleService(repoRoot, tmux, runtime);
+
+      const created = await lifecycle.createWorktrees({
+        branch: "main",
+        mode: "direct",
+        agents: ["claude", "codex"],
+      });
+
+      expect(created).toEqual({ primaryBranch: "main", branches: ["main"] });
+      expect(tmux.listWindows().map((window) => window.windowName).sort()).toEqual(
+        [buildWorktreeWindowName("main"), buildWorktreeWindowName("main", "codex")].sort(),
+      );
+      const gitDir = new BunGitGateway().resolveWorktreeGitDir(repoRoot);
+      const meta = await readWorktreeMeta(gitDir);
+      const agentWindowTab = meta?.tabs?.find((tab) => tab.kind === "agent-window");
+      expect(agentWindowTab?.agentId).toBe("codex");
+      expect(agentWindowTab?.windowName).toBe(buildWorktreeWindowName("main", "codex"));
     });
   });
 
@@ -1947,7 +2117,8 @@ describe("LifecycleService", () => {
     ]);
   });
 
-  it("uses auto_name once when creating paired worktrees without an explicit branch", async () => {
+  it("uses auto_name once when creating paired worktrees without an explicit branch (legacy flag off)", async () => {
+    useLegacyMultiAgentBranches();
     const repoRoot = await initRepo();
     const runtime = new ProjectRuntime();
     const tmux = new FakeTmuxGateway();

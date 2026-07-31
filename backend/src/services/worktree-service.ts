@@ -74,6 +74,12 @@ export interface CreateManagedWorktreeOptions {
   oneshot?: OneshotMeta;
   sessionLayoutPlan?: SessionLayoutPlan;
   sessionLayoutPlanBuilder?: (initialized: InitializeManagedWorktreeResult) => SessionLayoutPlan;
+  /** True when `worktreePath` is already a real git worktree on disk (e.g.
+   *  created by `relocateUncommittedChangesToWorktree`'s `git worktree add`) —
+   *  skips the `git.createWorktree()` call but still runs meta
+   *  initialization/session materialization and still participates in rollback
+   *  (worktree removal) on a later failure. */
+  skipGitCreate?: boolean;
 }
 
 export interface CreateManagedWorktreeDependencies {
@@ -216,15 +222,19 @@ export async function createManagedWorktree(
   let sessionLayoutPlan = opts.sessionLayoutPlan;
 
   try {
-    git.createWorktree({
-      repoRoot: opts.repoRoot,
-      worktreePath: opts.worktreePath,
-      branch: opts.branch,
-      mode: opts.mode,
-      baseBranch: opts.baseBranch,
-      startPoint: opts.startPoint,
-    });
-    worktreeCreated = true;
+    if (opts.skipGitCreate) {
+      worktreeCreated = true;
+    } else {
+      git.createWorktree({
+        repoRoot: opts.repoRoot,
+        worktreePath: opts.worktreePath,
+        branch: opts.branch,
+        mode: opts.mode,
+        baseBranch: opts.baseBranch,
+        startPoint: opts.startPoint,
+      });
+      worktreeCreated = true;
+    }
 
     const gitDir = git.resolveWorktreeGitDir(opts.worktreePath);
     const dotenvValues = await loadDotenvLocal(opts.worktreePath);

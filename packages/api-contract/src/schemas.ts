@@ -8,6 +8,10 @@ const BooleanLikeSchema = z.union([
 
 export const ErrorResponseSchema = z.object({
   error: z.string(),
+  /** Machine-readable error code, present for a small set of errors callers
+   *  need to branch on programmatically (e.g. "direct_switch_dirty") rather
+   *  than string-matching `error`. Absent for most errors. */
+  code: z.string().optional(),
 });
 
 export const OkResponseSchema = z.object({
@@ -178,6 +182,20 @@ export const OpenWorktreeRequestSchema = z.object({
 export const CreateWorktreeResponseSchema = z.object({
   primaryBranch: z.string(),
   branches: z.array(z.string()),
+});
+
+/** Explicit opt-in recovery for a direct-mode branch switch blocked by
+ *  uncommitted changes in the main repo (LifecycleError code
+ *  "direct_switch_dirty"). Relocates those changes into a new temporary
+ *  worktree with an agent launched there to help resolve them. */
+export const RecoverDirectSwitchRequestSchema = z.object({
+  targetBranch: z.string(),
+  prompt: z.string().optional(),
+});
+
+export const RecoverDirectSwitchResponseSchema = z.object({
+  branch: z.string(),
+  worktreeId: z.string(),
 });
 
 export const SetWorktreeArchivedRequestSchema = z.object({
@@ -357,12 +375,16 @@ export const AppNotificationSchema = z.object({
 
 export const WorktreeTabSchema = z.object({
   tabId: z.string(),
-  kind: z.enum(["root", "fork"]),
+  kind: z.enum(["root", "fork", "agent-window"]),
   label: z.string(),
   seq: z.number().nullable(),
   sessionId: z.string().nullable(),
   paneId: z.string().optional(),
   createdAt: z.string(),
+  /** Set on "agent-window" tabs: the agent running in that tab's own tmux window. */
+  agentId: AgentIdSchema.optional(),
+  /** Set on "agent-window" tabs: the real tmux window name backing the tab. */
+  windowName: z.string().optional(),
 });
 
 export const ProjectWorktreeSnapshotSchema = z.object({
@@ -594,6 +616,11 @@ export const AppConfigSchema = z.object({
   autoRemoveOnMerge: z.boolean(),
   projectDir: z.string(),
   mainBranch: z.string(),
+  /** WEBMUX_GROUP_MULTI_AGENT_SESSION — when true (default), selecting
+   *  multiple agents for one worktree creation groups them into one
+   *  branch/worktree with one tmux window per agent, instead of the legacy
+   *  N-separate-branches behavior. Default true keeps older servers valid. */
+  groupMultiAgentSingleWorkflow: z.boolean().default(true),
 });
 
 export const CiLogsResponseSchema = z.object({
@@ -744,6 +771,8 @@ export type CreateWorktreeRequest = z.infer<typeof CreateWorktreeRequestSchema>;
 export type OpenWorktreeRequest = z.infer<typeof OpenWorktreeRequestSchema>;
 export type WorktreeSource = z.infer<typeof WorktreeSourceSchema>;
 export type CreateWorktreeResponse = z.infer<typeof CreateWorktreeResponseSchema>;
+export type RecoverDirectSwitchRequest = z.infer<typeof RecoverDirectSwitchRequestSchema>;
+export type RecoverDirectSwitchResponse = z.infer<typeof RecoverDirectSwitchResponseSchema>;
 export type SetWorktreeArchivedRequest = z.infer<typeof SetWorktreeArchivedRequestSchema>;
 export type SetWorktreeArchivedResponse = z.infer<typeof SetWorktreeArchivedResponseSchema>;
 export type SetWorktreeLabelRequest = z.infer<typeof SetWorktreeLabelRequestSchema>;

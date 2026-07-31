@@ -1,4 +1,4 @@
-import { AgentsUiConversationEventSchema, apiPaths, createApi } from "@webmux/api-contract";
+import { AgentsUiConversationEventSchema, ApiError, apiPaths, createApi } from "@webmux/api-contract";
 import type {
   AgentDetails,
   AgentResponse,
@@ -16,11 +16,14 @@ import type {
   ProjectInitState,
   ProjectSummary,
   ProjectWorktreeSnapshot,
+  RecoverDirectSwitchResponse,
   UpsertCustomAgentRequest,
   ValidateCustomAgentResponse,
   WorktreeInfo,
   WorktreeTab,
 } from "./types";
+
+export { ApiError };
 
 /** The active project's URL prefix, taken from the first path segment (the
  *  server serves each project under `/<prefix>/...` on the shared port). Empty
@@ -172,6 +175,16 @@ export function refreshWorktreeAgentTerminal(branch: string): Promise<void> {
   return api.refreshWorktreeAgentTerminal({
     params: { name: branch },
   }).then(() => undefined);
+}
+
+/** Explicit opt-in recovery for a direct-mode switch blocked by uncommitted
+ *  changes (ApiError.code === "direct_switch_dirty"). Relocates the main
+ *  repo's uncommitted changes into a new temporary worktree with an agent
+ *  launched there to help resolve them. */
+export function recoverDirectSwitch(targetBranch: string, prompt?: string): Promise<RecoverDirectSwitchResponse> {
+  return api.recoverDirectSwitch({
+    body: { targetBranch, ...(prompt ? { prompt } : {}) },
+  });
 }
 
 function withWorktreeName(path: string, branch: string): string {

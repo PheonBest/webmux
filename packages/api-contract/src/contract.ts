@@ -14,6 +14,8 @@ import {
   CreateTabResponseSchema,
   CreateWorktreeRequestSchema,
   CreateWorktreeResponseSchema,
+  RecoverDirectSwitchRequestSchema,
+  RecoverDirectSwitchResponseSchema,
   OpenWorktreeRequestSchema,
   EnabledResponseSchema,
   ErrorResponseSchema,
@@ -89,6 +91,7 @@ export const apiPaths = {
   deleteWorktreeTab: "/api/worktrees/:name/tabs/:tabId",
   mergeWorktree: "/api/worktrees/:name/merge",
   fetchWorktreeDiff: "/api/worktrees/:name/diff",
+  recoverDirectSwitch: "/api/worktrees/direct/recover",
   fetchLinearIssues: "/api/linear/issues",
   fetchAutoNameConfig: "/api/project/auto-name",
   setLinearAutoCreate: "/api/linear/auto-create",
@@ -412,6 +415,19 @@ export const apiContract = c.router({
     pathParams: WorktreeNameParamsSchema,
     responses: {
       200: WorktreeDiffResponseSchema,
+      ...commonErrorResponses,
+    },
+  },
+  /** Explicit opt-in recovery for a direct-mode switch blocked by uncommitted
+   *  changes (see DIRECT_SWITCH_DIRTY_ERROR_CODE / ErrorResponseSchema.code on
+   *  the blocked switch's 409). Relocates those changes into a new temporary
+   *  worktree with an agent launched there to help resolve them. */
+  recoverDirectSwitch: {
+    method: "POST",
+    path: apiPaths.recoverDirectSwitch,
+    body: RecoverDirectSwitchRequestSchema,
+    responses: {
+      201: RecoverDirectSwitchResponseSchema,
       ...commonErrorResponses,
     },
   },

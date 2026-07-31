@@ -63,10 +63,12 @@
   import {
     activePrefix,
     api,
+    ApiError,
     createWorktreeTab,
     deleteWorktreeTab,
     fetchWorktrees,
     postWorktreeToLinear,
+    recoverDirectSwitch,
     refreshWorktreeAgentTerminal,
     selectWorktreeTab,
     setWorktreeLabel,
@@ -92,6 +94,7 @@
       autoRemoveOnMerge: false,
       projectDir: "",
       mainBranch: "",
+      groupMultiAgentSingleWorkflow: true,
     };
   }
 
@@ -404,6 +407,12 @@
   let sidebarOpen = $state(false);
   let activePane = $state(0);
   let tabBusy = $state(false);
+  // Client-side only: which "agent-window" tab (a different agent's own real
+  // tmux window — the "group multiple agents" feature) is selected, if any.
+  // Unlike fork tabs (server-persisted swap-pane state), agent windows are
+  // selected purely by pointing the Terminal component's WebSocket at a
+  // different window — nothing to persist server-side.
+  let activeAgentWindowTabId = $state<string | null>(null);
   let terminalRef:
     | {
         sendSelectPane: (pane: number) => void;
@@ -454,19 +463,26 @@
   );
   let canConnect = $derived(!!selectedBranch && selectedWorktree?.mux === "✓" && !selectedWorktree?.creating);
   let showWebChat = $derived(useWebChatUi && canConnect && supportsWorktreeChat(selectedWorktree));
-  // Tabs are only meaningful for the built-in terminal agents that have a forkable session.
+  // Tabs are meaningful for the built-in terminal agents that have a forkable
+  // session, or whenever the worktree has extra "agent-window" tabs (the
+  // "group multiple agents" feature) regardless of the primary agent.
   let showTabBar = $derived(
     canConnect
     && !showWebChat
-    && (selectedWorktree?.agentName === "claude" || selectedWorktree?.agentName === "codex"),
+    && (selectedWorktree?.agentName === "claude"
+      || selectedWorktree?.agentName === "codex"
+      || (selectedWorktree?.tabs.some((tab) => tab.kind === "agent-window") ?? false)),
   );
+  let effectiveActiveTabId = $derived(activeAgentWindowTabId ?? selectedWorktree?.activeTabId ?? null);
   let isSelectedOpening = $derived(selectedBranch ? openingBranches.has(selectedBranch) : false);
   let isSelectedArchiving = $derived(selectedBranch ? archivingBranches.has(selectedBranch) : false);
   let isSelectedAgentTerminalRefreshing = $derived(
     selectedBranch ? refreshingAgentTerminalBranches.has(selectedBranch) : false,
   );
   let selectedTerminalKey = $derived(
-    selectedBranch ? `${selectedBranch}:${terminalSessionRevisions[selectedBranch] ?? 0}` : "",
+    selectedBranch
+      ? `${selectedBranch}:${terminalSessionRevisions[selectedBranch] ?? 0}:${activeAgentWindowTabId ?? "primary"}`
+      : "",
   );
   let pollIntervalMs = $derived(
     hasCreatingWorktrees ? ACTIVE_CREATE_POLL_INTERVAL_MS : DEFAULT_POLL_INTERVAL_MS,
@@ -481,6 +497,13 @@
         ? "No active worktrees."
         : "No worktrees found.",
   );
+
+  $effect(() => {
+    // Switching worktrees always lands back on the primary window/tab —
+    // an agent-window selection is local UI state, not carried across.
+    void selectedBranch;
+    activeAgentWindowTabId = null;
+  });
 
   $effect(() => {
     const nextSelectedBranch = resolveSelectedBranch(
@@ -688,13 +711,48 @@
         if (isMobile) sidebarOpen = false;
       }
     } catch (err) {
-      showToast({ tone: "error", message: `Failed to create: ${errorMessage(err)}` });
+      // Direct-mode branch switch blocked by uncommitted changes in the main
+      // repo — offer the explicit opt-in recovery (relocate those changes
+      // into a new temporary worktree + agent) instead of a plain error.
+      if (err instanceof ApiError && err.code === "direct_switch_dirty" && finalRequest.mode === "direct" && finalRequest.branch) {
+        await offerDirectSwitchRecovery(err.message, finalRequest.branch);
+      } else {
+        showToast({ tone: "error", message: `Failed to create: ${errorMessage(err)}` });
+      }
     } finally {
       pendingCreateCount = Math.max(0, pendingCreateCount - expectedCreatedCount);
       if (shouldAutoSelectCreatedWorktree && requestId === latestAutoSelectCreateId) {
         pendingCreateBranchHint = null;
         latestAutoSelectCreateId = -1;
       }
+    }
+  }
+
+  /** Explicit opt-in recovery for a direct-mode switch blocked by
+   *  uncommitted changes (ApiError.code "direct_switch_dirty"). Deliberately
+   *  a distinct confirm step + endpoint, not automatic — it creates new git
+   *  state (a branch + worktree) as a side effect of what looked like a
+   *  simple "switch branch" action. */
+  async function offerDirectSwitchRecovery(message: string, targetBranch: string): Promise<void> {
+    const wantsRecovery = confirm(
+      `${message}\n\nResolve in a new worktree? This relocates the uncommitted changes into a new temporary worktree and launches an agent there to help you review them.`,
+    );
+    if (!wantsRecovery) {
+      showToast({ tone: "error", message });
+      return;
+    }
+    try {
+      const result = await recoverDirectSwitch(targetBranch);
+      invalidateBranchCaches();
+      await refresh();
+      selectedBranch = result.branch;
+      if (isMobile) sidebarOpen = false;
+      showToast({
+        tone: "success",
+        message: `Created recovery worktree "${result.branch}" — resolve the changes there, then retry switching to "${targetBranch}".`,
+      });
+    } catch (recoverErr) {
+      showToast({ tone: "error", message: `Failed to create recovery worktree: ${errorMessage(recoverErr)}` });
     }
   }
 
@@ -1020,6 +1078,20 @@
   async function handleSelectTab(tabId: string): Promise<void> {
     const branch = selectedBranch;
     if (!branch || tabBusy) return;
+
+    // "agent-window" tabs (the "group multiple agents" feature) are a
+    // different agent's own real tmux window, not a swapped pane — selecting
+    // one is purely a client-side pointer change (which window the Terminal
+    // component's WebSocket connects to), nothing to persist server-side, and
+    // the fork-only selectWorktreeTab endpoint would reject it anyway (no
+    // paneId to swap).
+    const tab = selectedWorktree?.tabs.find((candidate) => candidate.tabId === tabId);
+    if (tab?.kind === "agent-window") {
+      activeAgentWindowTabId = tabId;
+      return;
+    }
+
+    activeAgentWindowTabId = null;
     tabBusy = true;
     try {
       await selectWorktreeTab(branch, tabId);
@@ -1398,7 +1470,7 @@
       {#if showTabBar && selectedWorktree}
         <TabBar
           tabs={selectedWorktree.tabs}
-          activeTabId={selectedWorktree.activeTabId}
+          activeTabId={effectiveActiveTabId}
           busy={tabBusy}
           oncreate={handleCreateTab}
           onselect={handleSelectTab}
@@ -1408,6 +1480,7 @@
       {#key selectedTerminalKey}
         <Terminal
           worktree={selectedBranch!}
+          tabId={activeAgentWindowTabId ?? undefined}
           {isMobile}
           initialPane={isMobile ? activePane : undefined}
           {terminalTheme}
@@ -1498,6 +1571,7 @@
     {lockedBaseBranch}
     startupEnvs={config.startupEnvs ?? {}}
     linearCreateTicketOption={config.linearCreateTicketOption}
+    groupMultiAgentEnabled={config.groupMultiAgentSingleWorkflow}
     openedFromLinearIssue={assignIssue !== null}
     oncreate={handleCreate}
     oncancel={() => { showCreateDialog = false; assignIssue = null; lockedBaseBranch = null; }}

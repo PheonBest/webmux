@@ -59,6 +59,8 @@ export type {
   ProjectSummary,
   ProjectWorktreeSnapshot,
   PullMainResult,
+  RecoverDirectSwitchRequest,
+  RecoverDirectSwitchResponse,
   ServiceConfig,
   UpsertCustomAgentRequest,
   ServiceStatus,
