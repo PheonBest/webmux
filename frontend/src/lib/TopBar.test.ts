@@ -33,6 +33,7 @@ function createWorktree(
     oneshot: null,
     tabs: [],
     activeTabId: null,
+    direct: false,
     ...overrides,
   };
 }

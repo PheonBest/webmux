@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 import { BunGitGateway, type CreateWorktreeMode, type GitGateway } from "../adapters/git";
 import {
   buildControlEnvMap,
@@ -38,6 +39,10 @@ export interface InitializeManagedWorktreeOptions {
   worktreeId?: string;
   source?: WorktreeSource;
   oneshot?: OneshotMeta;
+  /** True for a "direct" session (no separate `git worktree`, running on a
+   *  branch in the main repo's own working directory). Persisted on meta so
+   *  reconciliation/removal can recognize it later without re-deriving it. */
+  direct?: boolean;
 }
 
 export interface InitializeManagedWorktreeResult {
@@ -114,7 +119,7 @@ function cleanupSessionLayout(
 }
 
 function rollbackManagedWorktreeCreation(
-  opts: Pick<CreateManagedWorktreeOptions, "repoRoot" | "worktreePath" | "branch" | "deleteBranchOnRollback">,
+  opts: Pick<CreateManagedWorktreeOptions, "repoRoot" | "worktreePath" | "branch" | "deleteBranchOnRollback" | "mode">,
   sessionLayoutPlan: SessionLayoutPlan | undefined,
   git: GitGateway,
   deps: CreateManagedWorktreeDependencies,
@@ -123,17 +128,26 @@ function rollbackManagedWorktreeCreation(
   const sessionCleanupError = cleanupSessionLayout(deps.tmux, sessionLayoutPlan);
   if (sessionCleanupError) cleanupErrors.push(sessionCleanupError);
 
-  try {
-    git.removeWorktree({
-      repoRoot: opts.repoRoot,
-      worktreePath: opts.worktreePath,
-      force: true,
-    });
-  } catch (error) {
-    cleanupErrors.push(`worktree rollback failed: ${toErrorMessage(error)}`);
+  // "direct" mode never created a worktree (worktreePath === repoRoot), so
+  // there is nothing to `git worktree remove` — git.removeWorktree() already
+  // no-ops for this case, but we skip the call entirely here for clarity.
+  const isDirect = opts.mode === "direct";
+  if (!isDirect) {
+    try {
+      git.removeWorktree({
+        repoRoot: opts.repoRoot,
+        worktreePath: opts.worktreePath,
+        force: true,
+      });
+    } catch (error) {
+      cleanupErrors.push(`worktree rollback failed: ${toErrorMessage(error)}`);
+    }
   }
 
-  if (opts.deleteBranchOnRollback ?? true) {
+  // Never delete the branch on rollback for a direct session — it's the
+  // long-lived branch the user asked to run on (e.g. `main`), not a
+  // throwaway branch created for a disposable worktree.
+  if (!isDirect && (opts.deleteBranchOnRollback ?? true)) {
     try {
       git.deleteBranch(opts.repoRoot, opts.branch, true);
     } catch (error) {
@@ -165,6 +179,7 @@ export async function initializeManagedWorktree(
     allocatedPorts: { ...(opts.allocatedPorts ?? {}) },
     ...(opts.source ? { source: opts.source } : {}),
     ...(opts.oneshot ? { oneshot: opts.oneshot } : {}),
+    ...(opts.direct ? { direct: true } : {}),
   };
 
   const paths = await ensureWorktreeStorageDirs(opts.gitDir);
@@ -230,6 +245,7 @@ export async function createManagedWorktree(
       worktreeId: opts.worktreeId,
       ...(opts.source ? { source: opts.source } : {}),
       ...(opts.oneshot ? { oneshot: opts.oneshot } : {}),
+      ...(opts.mode === "direct" ? { direct: true } : {}),
     });
 
     if (deps.tmux) {
@@ -254,13 +270,19 @@ export function removeManagedWorktree(
   opts: RemoveManagedWorktreeOptions,
   git: GitGateway = new BunGitGateway(),
 ): void {
+  // A direct session's worktreePath is always repoRoot (see CreateWorktreeMode
+  // in adapters/git.ts). Detect it structurally rather than trusting a caller-
+  // supplied flag, so branch deletion can never leak through for this mode
+  // even if a future call site forgets to special-case it.
+  const isDirect = resolve(opts.worktreePath) === resolve(opts.repoRoot);
+
   git.removeWorktree({
     repoRoot: opts.repoRoot,
     worktreePath: opts.worktreePath,
     force: opts.force,
   });
 
-  if (opts.deleteBranch && opts.branch) {
+  if (!isDirect && opts.deleteBranch && opts.branch) {
     git.deleteBranch(opts.repoRoot, opts.branch, opts.deleteBranchForce);
   }
 }

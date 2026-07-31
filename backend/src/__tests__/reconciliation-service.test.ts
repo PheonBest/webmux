@@ -58,6 +58,10 @@ class FakeGitGateway implements GitGateway {
     return this.statuses.get(cwd) ?? { dirty: false, aheadCount: 0, currentCommit: null };
   }
 
+  hasUncommittedTrackedChanges(cwd: string): boolean {
+    return this.statuses.get(cwd)?.dirty ?? false;
+  }
+
   readStatus(): string {
     return "";
   }

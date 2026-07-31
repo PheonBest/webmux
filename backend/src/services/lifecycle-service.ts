@@ -152,6 +152,7 @@ export interface CreateWorktreeProgress {
   agent: AgentId;
   phase: WorktreeCreationPhase;
   source: WorktreeSource;
+  direct: boolean;
 }
 
 export interface LifecycleServiceDependencies {
@@ -229,7 +230,7 @@ export class LifecycleService {
   async createWorktrees(input: CreateLifecycleWorktreesInput): Promise<CreateLifecycleWorktreesResult> {
     const mode = input.mode ?? "new";
     const agentIds = this.resolveSelectedAgents(input);
-    if (agentIds.length > 1 && mode === "existing") {
+    if (agentIds.length > 1 && (mode === "existing" || mode === "direct")) {
       throw new LifecycleError("Creating multiple agents is only supported for new worktrees", 400);
     }
 
@@ -720,6 +721,27 @@ export class LifecycleService {
       const resolved = await this.resolveExistingWorktree(branch);
       this.ensureNoUncommittedChanges(resolved.entry);
 
+      // "Merge worktree" checks out `targetBranch` in the main repo root, merges,
+      // then restores whatever was checked out before (see BunGitGateway.mergeBranch).
+      // That checkout-and-restore dance is only safe when the root is idle — a
+      // "direct" session (mode "direct": no separate `git worktree`, the agent runs
+      // directly in the root's own checkout) has no separate directory to fall back
+      // to, so merging either its own branch or an unrelated worktree branch would
+      // yank the live session's files out from under it mid-run. Block both cases.
+      if (resolved.meta?.direct === true) {
+        throw new LifecycleError(
+          `${branch} is a direct (no-worktree) session — merge and clean it up manually with git instead.`,
+          400,
+        );
+      }
+      const rootDirectMeta = await this.readRootDirectMeta();
+      if (rootDirectMeta !== null) {
+        throw new LifecycleError(
+          `Cannot merge worktree branches while a direct (no-worktree) session is active on "${rootDirectMeta.branch}" — it uses the main repo's own checkout, which this merge would have to check out over.`,
+          409,
+        );
+      }
+
       mergeManagedWorktree(
         {
           repoRoot: this.deps.projectRoot,
@@ -840,7 +862,7 @@ export class LifecycleService {
     mode: CreateWorktreeMode,
   ): Promise<string> {
     const explicitBranch = rawBranch?.trim();
-    const branch = mode === "existing"
+    const branch = (mode === "existing" || mode === "direct")
       ? explicitBranch
       : explicitBranch || await this.generateAutoName(prompt) || generateFallbackBranchName();
     if (!branch) {
@@ -866,6 +888,27 @@ export class LifecycleService {
         throw new LifecycleError(`Branch already exists: ${branch}`, 409);
       }
       return { deleteBranchOnRollback: false };
+    }
+
+    if (mode === "direct") {
+      // Unlike "existing", a direct session's target branch is allowed to be
+      // the one currently checked out in the main repo itself (that's the
+      // no-op/idempotent "already running directly on this branch" case) —
+      // it's only a conflict if some *other* linked worktree already has it.
+      if (localBranches.has(branch)) {
+        if (this.listCheckedOutBranches({ excludeProjectRoot: true }).has(branch)) {
+          throw new LifecycleError(`Branch already has a worktree: ${branch}`, 409);
+        }
+        return { deleteBranchOnRollback: false };
+      }
+
+      const remoteBranches = new Set(this.listRemoteBranches());
+      if (!remoteBranches.has(branch)) {
+        throw new LifecycleError(`Branch not found: ${branch}`, 404);
+      }
+      // Branch deletion is never performed for direct sessions regardless of
+      // this flag (see worktree-service.ts), but keep it false for honesty.
+      return { startPoint: `origin/${branch}`, deleteBranchOnRollback: false };
     }
 
     if (localBranches.has(branch)) {
@@ -945,8 +988,40 @@ export class LifecycleService {
     return allocateServicePorts(metas, this.deps.config.services);
   }
 
-  private resolveWorktreePath(branch: string): string {
+  private resolveWorktreePath(branch: string, mode: CreateWorktreeMode = "new"): string {
+    if (mode === "direct") {
+      // The whole point of "direct" mode: no separate worktree directory —
+      // the session runs in the main repo's own working directory.
+      return resolve(this.deps.projectRoot);
+    }
     return resolve(this.deps.projectRoot, this.deps.config.workspace.worktreeRoot, branch);
+  }
+
+  /** Guard rails for mode "direct" before the actual `git checkout` runs:
+   *  refuse if the main repo has uncommitted changes (never auto-stash/force
+   *  over dirty state), and — since only one direct session can exist at a
+   *  time (git only allows one branch checked out in the main repo) — tear
+   *  down the previous direct session's tmux window if it's on a different
+   *  branch, so switching branches doesn't leave a stale window/meta pointing
+   *  at a branch that's no longer actually checked out there. */
+  private async prepareDirectSessionSwitch(targetBranch: string): Promise<void> {
+    const projectRoot = resolve(this.deps.projectRoot);
+    // Untracked files — including webmux's own `.claude`/`.codex` agent-runtime
+    // artifacts written into the main repo by a previous direct session — don't
+    // block this switch; only real uncommitted work to tracked files does.
+    if (this.deps.git.hasUncommittedTrackedChanges(projectRoot)) {
+      throw new LifecycleError(
+        `Cannot switch the main repo to '${targetBranch}' — it has uncommitted changes. Commit or stash them first.`,
+        409,
+      );
+    }
+
+    const existingDirectMeta = await this.readRootDirectMeta();
+    if (!existingDirectMeta || existingDirectMeta.branch === targetBranch) {
+      return;
+    }
+
+    this.killWorktreeWindows(existingDirectMeta.branch);
   }
 
   private listLocalBranches(): string[] {
@@ -957,27 +1032,47 @@ export class LifecycleService {
     return this.deps.git.listRemoteBranches(resolve(this.deps.projectRoot));
   }
 
-  private listCheckedOutBranches(): Set<string> {
+  private listCheckedOutBranches(options: { excludeProjectRoot?: boolean } = {}): Set<string> {
     // Raw listWorktrees on purpose: a stale registration still holds its branch
     // in git's view, so it must continue to block branch reuse. Switching this
     // to listLiveWorktrees would falsely report the branch as free.
+    const projectRoot = resolve(this.deps.projectRoot);
     return new Set(
-      this.deps.git.listWorktrees(resolve(this.deps.projectRoot))
-        .filter((entry): entry is GitWorktreeEntry & { branch: string } => !entry.bare && entry.branch !== null)
+      this.deps.git.listWorktrees(projectRoot)
+        .filter((entry): entry is GitWorktreeEntry & { branch: string } =>
+          !entry.bare
+          && entry.branch !== null
+          && !(options.excludeProjectRoot && resolve(entry.path) === projectRoot)
+        )
         .map((entry) => entry.branch),
     );
   }
 
-  private listProjectWorktrees(): GitWorktreeEntry[] {
+  /** True when the main repo root currently hosts a "direct" session (mode
+   *  "direct": an agent running on a branch in the main repo's own checkout,
+   *  no `git worktree` involved). Detected via meta.json under the main
+   *  repo's own gitDir (repoRoot/.git/webmux/), since a direct session's
+   *  worktreePath === repoRoot by construction. */
+  private async readRootDirectMeta(): Promise<WorktreeMeta | null> {
     const projectRoot = resolve(this.deps.projectRoot);
-    return this.deps.git.listLiveWorktrees(projectRoot).filter((entry) =>
-      !entry.bare && resolve(entry.path) !== projectRoot
+    const gitDir = this.deps.git.resolveWorktreeGitDir(projectRoot);
+    const meta = await readWorktreeMeta(gitDir);
+    return meta?.direct === true ? meta : null;
+  }
+
+  private async listProjectWorktrees(): Promise<GitWorktreeEntry[]> {
+    const projectRoot = resolve(this.deps.projectRoot);
+    const entries = this.deps.git.listLiveWorktrees(projectRoot).filter((entry) => !entry.bare);
+    const rootDirectMeta = await this.readRootDirectMeta();
+    return entries.filter((entry) =>
+      resolve(entry.path) !== projectRoot || rootDirectMeta !== null
     );
   }
 
   private async readManagedMetas(): Promise<WorktreeMeta[]> {
+    const entries = await this.listProjectWorktrees();
     const metas = await Promise.all(
-      this.listProjectWorktrees().map(async (entry) => {
+      entries.map(async (entry) => {
         const gitDir = this.deps.git.resolveWorktreeGitDir(entry.path);
         return readWorktreeMeta(gitDir);
       }),
@@ -987,7 +1082,8 @@ export class LifecycleService {
   }
 
   private async resolveExistingWorktree(branch: string): Promise<ResolvedLifecycleWorktree> {
-    const entry = this.listProjectWorktrees().find((candidate) => candidate.branch === branch);
+    const entries = await this.listProjectWorktrees();
+    const entry = entries.find((candidate) => candidate.branch === branch);
     if (!entry) {
       throw new LifecycleError(`Worktree not found: ${branch}`, 404);
     }
@@ -998,7 +1094,7 @@ export class LifecycleService {
   }
 
   private async resolveAllWorktrees(): Promise<ResolvedLifecycleWorktree[]> {
-    const entries = this.listProjectWorktrees().sort((left, right) =>
+    const entries = (await this.listProjectWorktrees()).sort((left, right) =>
       (left.branch ?? left.path).localeCompare(right.branch ?? right.path)
     );
 
@@ -1323,14 +1419,19 @@ export class LifecycleService {
     }
 
     this.killWorktreeWindows(branch);
+    // deleteBranch is ignored by removeManagedWorktree for direct sessions
+    // (worktreePath === repoRoot) regardless of what's passed here — see
+    // worktree-service.ts — but we also pass false explicitly for clarity:
+    // a direct session's branch (e.g. `main`) must never be deleted.
+    const isDirect = resolved.meta?.direct === true;
     removeManagedWorktree(
       {
         repoRoot: this.deps.projectRoot,
         worktreePath: resolved.entry.path,
         branch,
         force: true,
-        deleteBranch: true,
-        deleteBranchForce: true,
+        deleteBranch: !isDirect,
+        deleteBranchForce: !isDirect,
       },
       this.deps.git,
     );
@@ -1405,8 +1506,12 @@ export class LifecycleService {
     const branchAvailability = this.resolveBranchAvailability(input.branch, input.mode);
     const { profileName, profile } = this.resolveProfile(input.profile);
     const agent = this.resolveAgentDefinition(input.agent);
-    const worktreePath = this.resolveWorktreePath(input.branch);
+    const worktreePath = this.resolveWorktreePath(input.branch, input.mode);
     const source: WorktreeSource = input.source ?? "ui";
+
+    if (input.mode === "direct") {
+      await this.prepareDirectSessionSwitch(input.branch);
+    }
     const createProgressBase = {
       branch: input.branch,
       ...(baseBranch ? { baseBranch } : {}),
@@ -1414,6 +1519,7 @@ export class LifecycleService {
       profile: profileName,
       agent: input.agent,
       source,
+      direct: input.mode === "direct",
     } satisfies Omit<CreateWorktreeProgress, "phase">;
     const deleteBranchOnRollback = input.mode === "new" || branchAvailability.deleteBranchOnRollback;
     let initialized: InitializeManagedWorktreeResult | null = null;

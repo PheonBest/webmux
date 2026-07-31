@@ -1002,6 +1002,122 @@ describe("LifecycleService", () => {
     expect(run(["git", "branch", "--list", "feature-existing-rollback"], repoRoot)).toContain("feature-existing-rollback");
   });
 
+  describe("mode: direct", () => {
+    it("runs the session directly in the main repo — no worktree directory, branch checked out in place", async () => {
+      const repoRoot = await initRepo();
+      const runtime = new ProjectRuntime();
+      const tmux = new FakeTmuxGateway();
+      const lifecycle = makeLifecycleService(repoRoot, tmux, runtime);
+
+      run(["git", "checkout", "-b", "release/direct"], repoRoot);
+      run(["git", "checkout", "main"], repoRoot);
+
+      const created = await lifecycle.createWorktree({
+        mode: "direct",
+        branch: "release/direct",
+      });
+
+      expect(created.branch).toBe("release/direct");
+      expect(run(["git", "branch", "--show-current"], repoRoot)).toBe("release/direct");
+      // No __worktrees/release/direct directory was created.
+      expect(await Bun.file(join(repoRoot, "__worktrees", "release", "direct")).exists()).toBe(false);
+      // Only the main checkout is registered — no linked worktree.
+      expect(new BunGitGateway().listWorktrees(repoRoot).length).toBe(1);
+
+      const gitDir = new BunGitGateway().resolveWorktreeGitDir(repoRoot);
+      const meta = await readWorktreeMeta(gitDir);
+      expect(meta?.direct).toBe(true);
+      expect(meta?.branch).toBe("release/direct");
+    });
+
+    it("refuses to switch branches when the main repo has uncommitted changes", async () => {
+      const repoRoot = await initRepo();
+      const runtime = new ProjectRuntime();
+      const tmux = new FakeTmuxGateway();
+      const lifecycle = makeLifecycleService(repoRoot, tmux, runtime);
+
+      run(["git", "checkout", "-b", "release/dirty-target"], repoRoot);
+      run(["git", "checkout", "main"], repoRoot);
+      await Bun.write(join(repoRoot, "README.md"), "# repo\nuncommitted local change\n");
+
+      await expect(
+        lifecycle.createWorktree({
+          mode: "direct",
+          branch: "release/dirty-target",
+        }),
+      ).rejects.toThrow(/uncommitted changes/);
+
+      // Still on main — nothing was checked out.
+      expect(run(["git", "branch", "--show-current"], repoRoot)).toBe("main");
+    });
+
+    it("checks out over the previous direct session when starting a new one on a different branch", async () => {
+      const repoRoot = await initRepo();
+      const runtime = new ProjectRuntime();
+      const tmux = new FakeTmuxGateway();
+      const lifecycle = makeLifecycleService(repoRoot, tmux, runtime);
+
+      run(["git", "checkout", "-b", "release/first"], repoRoot);
+      run(["git", "checkout", "-b", "release/second", "main"], repoRoot);
+      run(["git", "checkout", "main"], repoRoot);
+
+      await lifecycle.createWorktree({ mode: "direct", branch: "release/first" });
+      expect(tmux.hasWindow(
+        buildProjectSessionName(repoRoot),
+        buildWorktreeWindowName("release/first"),
+      )).toBe(true);
+
+      await lifecycle.createWorktree({ mode: "direct", branch: "release/second" });
+
+      // Git only allows one branch checked out in the main repo — the second
+      // create checks out over the first.
+      expect(run(["git", "branch", "--show-current"], repoRoot)).toBe("release/second");
+      // The first session's tmux window was torn down as part of the switch.
+      expect(tmux.hasWindow(
+        buildProjectSessionName(repoRoot),
+        buildWorktreeWindowName("release/first"),
+      )).toBe(false);
+      // Only one direct session's metadata survives, pointing at the new branch.
+      const gitDir = new BunGitGateway().resolveWorktreeGitDir(repoRoot);
+      const meta = await readWorktreeMeta(gitDir);
+      expect(meta?.branch).toBe("release/second");
+
+      // Both branches themselves still exist — switching never deletes a branch.
+      expect(run(["git", "branch", "--list", "release/first"], repoRoot)).toContain("release/first");
+      expect(run(["git", "branch", "--list", "release/second"], repoRoot)).toContain("release/second");
+    });
+
+    it("removing a direct session never deletes its branch", async () => {
+      const repoRoot = await initRepo();
+      const runtime = new ProjectRuntime();
+      const tmux = new FakeTmuxGateway();
+      const lifecycle = makeLifecycleService(repoRoot, tmux, runtime);
+
+      run(["git", "checkout", "-b", "release/keep-me"], repoRoot);
+      run(["git", "checkout", "main"], repoRoot);
+
+      await lifecycle.createWorktree({ mode: "direct", branch: "release/keep-me" });
+      await lifecycle.removeWorktree("release/keep-me");
+
+      expect(run(["git", "branch", "--list", "release/keep-me"], repoRoot)).toContain("release/keep-me");
+      // The main checkout is still registered as a worktree (it's the repo itself).
+      expect(new BunGitGateway().listWorktrees(repoRoot).some((entry) => entry.path === repoRoot)).toBe(true);
+    });
+
+    it("rejects multiple agents for a direct session (only one checkout can exist)", async () => {
+      const repoRoot = await initRepo();
+      const runtime = new ProjectRuntime();
+      const tmux = new FakeTmuxGateway();
+      const lifecycle = makeLifecycleService(repoRoot, tmux, runtime);
+
+      await expect(lifecycle.createWorktrees({
+        branch: "main",
+        mode: "direct",
+        agents: ["claude", "codex"],
+      })).rejects.toThrow("Creating multiple agents is only supported for new worktrees");
+    });
+  });
+
   it("opens an unmanaged worktree by initializing metadata and rebuilding tmux layout", async () => {
     const repoRoot = await initRepo();
     const runtime = new ProjectRuntime();

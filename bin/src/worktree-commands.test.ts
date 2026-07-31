@@ -147,6 +147,15 @@ describe("parseAddCommandArgs", () => {
     });
   });
 
+  it("parses --direct flag", () => {
+    expect(parseAddCommandArgs(["main", "--direct"])).toEqual({
+      input: { branch: "main", mode: "direct" },
+      detach: false,
+      fromLinearIssueId: null,
+      branchExplicit: true,
+    });
+  });
+
   it("parses --detach flag", () => {
     expect(parseAddCommandArgs(["feature/search", "--detach"])).toEqual({
       input: { branch: "feature/search" },

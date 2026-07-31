@@ -82,6 +82,7 @@ function mapWorktree(snapshot: ProjectWorktreeSnapshot): WorktreeInfo {
     oneshot: snapshot.oneshot,
     tabs: snapshot.tabs,
     activeTabId: snapshot.activeTabId,
+    direct: snapshot.direct,
   };
 }
 

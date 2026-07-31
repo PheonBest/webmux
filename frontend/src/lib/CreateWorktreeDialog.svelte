@@ -192,7 +192,7 @@
   });
 
   $effect(() => {
-    if (creatingMultipleAgents && mode === "existing") {
+    if (creatingMultipleAgents && (mode === "existing" || mode === "direct")) {
       mode = "new";
       selectedExistingBranch = "";
     }
@@ -231,6 +231,13 @@
     }
   }
 
+  function openDirectBranchSelector(): void {
+    mode = "direct";
+    if (!selectedExistingBranch && initialBranch.trim().length > 0) {
+      selectedExistingBranch = initialBranch.trim();
+    }
+  }
+
   function switchToNewBranchMode(): void {
     mode = "new";
   }
@@ -261,7 +268,7 @@
         }
       }
       const trimmedPrompt = prompt.trim();
-      const branchName = mode === "existing" ? selectedExistingBranch : newBranchName.trim();
+      const branchName = mode === "new" ? newBranchName.trim() : selectedExistingBranch;
       if (createLinearTicket && linearTeamKeyValid) {
         localStorage.setItem(LINEAR_TEAM_KEY_STORAGE_KEY, linearTeamKeyTrimmed);
       }
@@ -333,15 +340,24 @@
             {/if}
           </div>
         {:else}
-          <button
-            type="button"
-            class="mt-2 text-[11px] text-accent hover:underline"
-            onclick={openExistingBranchSelector}
-          >
-            Use existing branch
-          </button>
+          <div class="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+            <button
+              type="button"
+              class="text-[11px] text-accent hover:underline"
+              onclick={openExistingBranchSelector}
+            >
+              Use existing branch
+            </button>
+            <button
+              type="button"
+              class="text-[11px] text-accent hover:underline"
+              onclick={openDirectBranchSelector}
+            >
+              Run directly on branch (no worktree)
+            </button>
+          </div>
         {/if}
-      {:else}
+      {:else if mode === "existing"}
         <BranchSelector
           label="Existing branch"
           selected={selectedExistingBranch}
@@ -365,6 +381,33 @@
         </button>
         <p class="mt-2 text-[11px] text-muted">
           Removing this worktree will also delete the branch.
+        </p>
+      {:else}
+        <BranchSelector
+          label="Branch to run directly on"
+          selected={selectedExistingBranch}
+          branches={availableBranches}
+          loading={availableBranchesLoading}
+          error={availableBranchesError}
+          placeholder="Select a branch"
+          initialOpen={true}
+          inlineToggleLabel="include remote"
+          inlineToggleAriaLabel="Include remote branches"
+          inlineToggleChecked={includeRemoteBranches}
+          oninlinetoggle={() => (includeRemoteBranches = !includeRemoteBranches)}
+          onselect={selectExistingBranch}
+        />
+        <button
+          type="button"
+          class="mt-2 text-[11px] text-accent hover:underline"
+          onclick={switchToNewBranchMode}
+        >
+          Create new branch instead
+        </button>
+        <p class="mt-2 text-[11px] text-muted">
+          Runs the agent directly in the main repo's own checkout — no separate worktree
+          directory is created. Only one such session can run at a time; starting another
+          one checks out over this one. Removing this session never deletes the branch.
         </p>
       {/if}
     </div>

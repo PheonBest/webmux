@@ -9,6 +9,7 @@ export interface WorktreeCreationProgress {
   agent: AgentId;
   phase: WorktreeCreationPhase;
   source: WorktreeSource;
+  direct: boolean;
 }
 
 export class WorktreeCreationTracker {
@@ -23,6 +24,7 @@ export class WorktreeCreationTracker {
       agentName: progress.agent,
       phase: progress.phase,
       source: progress.source,
+      direct: progress.direct,
     };
     this.worktrees.set(progress.branch, next);
   }

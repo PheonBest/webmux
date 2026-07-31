@@ -169,6 +169,71 @@ describe("BunGitGateway", () => {
     expect(read(["git", "branch", "--show-current"], worktreePath)).toBe("feature-existing");
   });
 
+  it("checks out a branch directly in the main repo for mode direct (no worktree add)", async () => {
+    repoRoot = await mkdtemp(join(tmpdir(), "webmux-gitgw-direct-"));
+    run(["git", "init", "-b", "main"], repoRoot);
+    run(["git", "config", "user.name", "Test User"], repoRoot);
+    run(["git", "config", "user.email", "test@example.com"], repoRoot);
+    await Bun.write(join(repoRoot, "README.md"), "# repo\n");
+    run(["git", "add", "README.md"], repoRoot);
+    run(["git", "commit", "-m", "init"], repoRoot);
+    run(["git", "checkout", "-b", "feature-direct"], repoRoot);
+    run(["git", "checkout", "main"], repoRoot);
+
+    const gateway = new BunGitGateway();
+    gateway.createWorktree({
+      repoRoot,
+      worktreePath: repoRoot,
+      branch: "feature-direct",
+      mode: "direct",
+    });
+
+    expect(read(["git", "branch", "--show-current"], repoRoot)).toBe("feature-direct");
+    // No `git worktree add` was issued — no new worktree registration exists.
+    expect(gateway.listWorktrees(repoRoot).length).toBe(1);
+  });
+
+  it("refuses to check out directly when the main repo has uncommitted changes", async () => {
+    repoRoot = await mkdtemp(join(tmpdir(), "webmux-gitgw-direct-dirty-"));
+    run(["git", "init", "-b", "main"], repoRoot);
+    run(["git", "config", "user.name", "Test User"], repoRoot);
+    run(["git", "config", "user.email", "test@example.com"], repoRoot);
+    await Bun.write(join(repoRoot, "README.md"), "# repo\n");
+    run(["git", "add", "README.md"], repoRoot);
+    run(["git", "commit", "-m", "init"], repoRoot);
+    run(["git", "checkout", "-b", "feature-direct-dirty"], repoRoot);
+    run(["git", "checkout", "main"], repoRoot);
+    await Bun.write(join(repoRoot, "README.md"), "# repo\nuncommitted\n");
+
+    const gateway = new BunGitGateway();
+    expect(() => {
+      gateway.createWorktree({
+        repoRoot,
+        worktreePath: repoRoot,
+        branch: "feature-direct-dirty",
+        mode: "direct",
+      });
+    }).toThrow(/uncommitted changes/);
+    expect(read(["git", "branch", "--show-current"], repoRoot)).toBe("main");
+  });
+
+  it("removeWorktree no-ops for a direct session (worktreePath === repoRoot)", async () => {
+    repoRoot = await mkdtemp(join(tmpdir(), "webmux-gitgw-direct-remove-"));
+    run(["git", "init", "-b", "main"], repoRoot);
+    run(["git", "config", "user.name", "Test User"], repoRoot);
+    run(["git", "config", "user.email", "test@example.com"], repoRoot);
+    await Bun.write(join(repoRoot, "README.md"), "# repo\n");
+    run(["git", "add", "README.md"], repoRoot);
+    run(["git", "commit", "-m", "init"], repoRoot);
+
+    const gateway = new BunGitGateway();
+    expect(() => {
+      gateway.removeWorktree({ repoRoot, worktreePath: repoRoot });
+    }).not.toThrow();
+    // The main checkout is untouched — still registered, still on its branch.
+    expect(gateway.listWorktrees(repoRoot).some((entry) => entry.path === repoRoot)).toBe(true);
+  });
+
   it("lists local branches", async () => {
     repoRoot = await mkdtemp(join(tmpdir(), "webmux-gitgw-branches-"));
     run(["git", "init", "-b", "main"], repoRoot);

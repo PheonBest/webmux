@@ -38,6 +38,7 @@ function makeState(overrides: Partial<ManagedWorktreeRuntimeState> = {}): Manage
     prs: [],
     tabs: [],
     activeTabId: null,
+    direct: false,
     ...overrides,
   };
 }

@@ -92,10 +92,14 @@ export function getWorktreeCommandUsage(command: WorktreeSubcommand): string {
     case "add":
       return [
         "Usage:",
-        "  webmux add [branch] [--existing] [--base <branch>] [--profile <name>] [--agent <id>] [--prompt <text>] [--env KEY=VALUE] [--detach] [--from-linear <issue-id>]",
+        "  webmux add [branch] [--existing|--direct] [--base <branch>] [--profile <name>] [--agent <id>] [--prompt <text>] [--env KEY=VALUE] [--detach] [--from-linear <issue-id>]",
         "",
         "Options:",
         "  --existing               Use an existing local or remote branch instead of creating a new one",
+        "  --direct                 Run directly on an existing branch in the main repo's own",
+        "                           working directory — no `git worktree` is created. Only one",
+        "                           such session can run at a time; removing it never deletes",
+        "                           the branch.",
         "  --base <branch>         Base branch for a new worktree (defaults to config)",
         "  --profile <name>         Worktree profile from .webmux.yaml",
         "  --agent <id>              Agent id to launch (repeatable)",
@@ -244,6 +248,11 @@ export function parseAddCommandArgs(args: string[]): ParsedAddCommand | null {
 
     if (arg === "--existing") {
       input.mode = "existing";
+      continue;
+    }
+
+    if (arg === "--direct") {
+      input.mode = "direct";
       continue;
     }
 

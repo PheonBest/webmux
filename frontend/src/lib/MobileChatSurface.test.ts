@@ -51,6 +51,7 @@ function createWorktree(overrides: Partial<WorktreeInfo> = {}): WorktreeInfo {
     oneshot: null,
     tabs: [],
     activeTabId: null,
+    direct: false,
     ...overrides,
   };
 }

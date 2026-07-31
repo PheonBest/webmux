@@ -214,7 +214,7 @@
       {@const isArchived = wt.archived}
       {@const isBusy = isRemoving || isInitializing}
       {@const hasLabel = !!wt.label}
-      {@const hasBadgeRow = isArchived || isCreating || isInitializing || isClosed || wt.prs.length > 0 || !!wt.linearIssue || wt.source === "oneshot"}
+      {@const hasBadgeRow = isArchived || isCreating || isInitializing || isClosed || wt.prs.length > 0 || !!wt.linearIssue || wt.source === "oneshot" || wt.direct}
       <li
         data-branch={wt.branch}
         class="mb-0.5 group relative {isBusy ? 'opacity-40 pointer-events-none' : ''}"
@@ -255,6 +255,14 @@
               </span>
               {#if hasBadgeRow}
                 <span class="flex min-w-0 flex-wrap items-center gap-1.5" data-worktree-badge-row>
+                  {#if wt.direct}
+                    <span
+                      class="shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-edge text-muted"
+                      title="Running directly on the main repo's checkout — no separate worktree"
+                    >
+                      direct
+                    </span>
+                  {/if}
                   {#if wt.source === "oneshot"}
                     <span
                       class="shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-edge text-muted"
@@ -373,16 +381,18 @@
             >
               Change profile…
             </button>
-            <button
-              type="button"
-              class="w-full px-2 py-1.5 rounded text-left text-xs text-primary hover:bg-hover"
-              onclick={(event) => {
-                event.stopPropagation();
-                runMenuAction(wt.branch, onmerge);
-              }}
-            >
-              Merge
-            </button>
+            {#if !wt.direct}
+              <button
+                type="button"
+                class="w-full px-2 py-1.5 rounded text-left text-xs text-primary hover:bg-hover"
+                onclick={(event) => {
+                  event.stopPropagation();
+                  runMenuAction(wt.branch, onmerge);
+                }}
+              >
+                Merge
+              </button>
+            {/if}
             <button
               type="button"
               disabled={isCreating}

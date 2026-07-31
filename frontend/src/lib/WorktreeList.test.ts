@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import WorktreeList from "./WorktreeList.svelte";
 import type { WorktreeInfo, WorktreeListRow } from "./types";
 
-function createWorktree(branch: string): WorktreeInfo {
+function createWorktree(branch: string, overrides: Partial<WorktreeInfo> = {}): WorktreeInfo {
   return {
     branch,
     label: null,
@@ -38,6 +38,8 @@ function createWorktree(branch: string): WorktreeInfo {
     oneshot: null,
     tabs: [],
     activeTabId: null,
+    direct: false,
+    ...overrides,
   };
 }
 
@@ -224,6 +226,32 @@ describe("WorktreeList", () => {
     expect(nameRow).not.toContainElement(archived);
     expect(badgeRow).toContainElement(archived);
     expect(badgeRow).toContainElement(closed);
+  });
+
+  it("shows a 'direct' badge for a no-worktree session", () => {
+    render(WorktreeList, {
+      props: {
+        rows: [
+          createRow(createWorktree("main", { direct: true })),
+          createRow(createWorktree("feature/normal")),
+        ],
+        selected: null,
+        removing: new Set<string>(),
+        initializing: new Set<string>(),
+        archiving: new Set<string>(),
+        postingLinear: new Set<string>(),
+        notifiedBranches: new Set<string>(),
+        onselect: vi.fn(),
+        onclose: vi.fn(),
+        onarchive: vi.fn(),
+        onmerge: vi.fn(),
+        oncreatesubworktree: vi.fn(),
+        onremove: vi.fn(),
+        oneditprofile: vi.fn(),
+      },
+    });
+
+    expect(screen.getByText("direct")).toBeInTheDocument();
   });
 
   it("disables the archive action while the row is archiving", async () => {
