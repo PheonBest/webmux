@@ -381,16 +381,18 @@
             >
               Change profile…
             </button>
-            <button
-              type="button"
-              class="w-full px-2 py-1.5 rounded text-left text-xs text-primary hover:bg-hover"
-              onclick={(event) => {
-                event.stopPropagation();
-                runMenuAction(wt.branch, onmerge);
-              }}
-            >
-              Merge
-            </button>
+            {#if !wt.direct}
+              <button
+                type="button"
+                class="w-full px-2 py-1.5 rounded text-left text-xs text-primary hover:bg-hover"
+                onclick={(event) => {
+                  event.stopPropagation();
+                  runMenuAction(wt.branch, onmerge);
+                }}
+              >
+                Merge
+              </button>
+            {/if}
             <button
               type="button"
               disabled={isCreating}

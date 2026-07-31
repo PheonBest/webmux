@@ -716,6 +716,27 @@ export class LifecycleService {
       const resolved = await this.resolveExistingWorktree(branch);
       this.ensureNoUncommittedChanges(resolved.entry);
 
+      // "Merge worktree" checks out `targetBranch` in the main repo root, merges,
+      // then restores whatever was checked out before (see BunGitGateway.mergeBranch).
+      // That checkout-and-restore dance is only safe when the root is idle — a
+      // "direct" session (mode "direct": no separate `git worktree`, the agent runs
+      // directly in the root's own checkout) has no separate directory to fall back
+      // to, so merging either its own branch or an unrelated worktree branch would
+      // yank the live session's files out from under it mid-run. Block both cases.
+      if (resolved.meta?.direct === true) {
+        throw new LifecycleError(
+          `${branch} is a direct (no-worktree) session — merge and clean it up manually with git instead.`,
+          400,
+        );
+      }
+      const rootDirectMeta = await this.readRootDirectMeta();
+      if (rootDirectMeta !== null) {
+        throw new LifecycleError(
+          `Cannot merge worktree branches while a direct (no-worktree) session is active on "${rootDirectMeta.branch}" — it uses the main repo's own checkout, which this merge would have to check out over.`,
+          409,
+        );
+      }
+
       mergeManagedWorktree(
         {
           repoRoot: this.deps.projectRoot,

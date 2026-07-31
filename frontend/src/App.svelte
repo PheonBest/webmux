@@ -1067,7 +1067,7 @@
       openCreateDialog();
     } else if (e.key === "m" || e.key === "M") {
       e.preventDefault();
-      if (selectedBranch) mergeBranch = selectedBranch;
+      if (selectedBranch && !selectedWorktree?.direct) mergeBranch = selectedBranch;
     } else if (e.key === "d" || e.key === "D") {
       e.preventDefault();
       if (selectedBranch) removeBranch = selectedBranch;

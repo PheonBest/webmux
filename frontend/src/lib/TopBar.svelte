@@ -231,9 +231,11 @@
       >
         {isMobile ? (worktree.archived ? "Re" : "A") : (worktree.archived ? "Restore" : "Archive")}
       </Btn>
-      <Btn variant="accent-outline" onclick={onmerge} title="Merge worktree"
-        >{isMobile ? "M" : "Merge"}</Btn
-      >
+      {#if !worktree.direct}
+        <Btn variant="accent-outline" onclick={onmerge} title="Merge worktree"
+          >{isMobile ? "M" : "Merge"}</Btn
+        >
+      {/if}
       <Btn variant="danger-outline" onclick={onremove} title="Remove worktree"
         >{isMobile ? "R" : "Remove"}</Btn
       >
