@@ -2413,11 +2413,15 @@ function hasProjectConfig(root: string): boolean {
   return existsSync(join(root, ".webmux.yaml")) || existsSync(join(root, ".webmux.local.yaml"));
 }
 
-/** Agent used to author config on setup. Prefer Claude; use Codex only when
- *  it's the one actually installed. With neither present, default the
- *  scaffolded config to Claude (analysis is skipped, but the file persists). */
+/** Agent used to author config on setup. Prefer Claude, then Codex, then
+ *  opencode, in order of whichever is actually installed. With none present,
+ *  default the scaffolded config to Claude (analysis is skipped, but the file
+ *  persists). */
 function authoringAgent(): InitAgent {
-  return which("codex") && !which("claude") ? "codex" : "claude";
+  if (which("claude")) return "claude";
+  if (which("codex")) return "codex";
+  if (which("opencode")) return "opencode";
+  return "claude";
 }
 
 const ANALYZE_TIMEOUT_MS = 120_000;
@@ -2425,7 +2429,7 @@ const ANALYZE_TIMEOUT_MS = 120_000;
 /** I/O for the on-add setup flow. The server is local, so it spawns the agent
  *  with the repo as cwd to scaffold + flesh out `.webmux.yaml`, then registers. */
 const projectInitDeps: ProjectInitDeps = {
-  analyzerAvailable: () => which("claude") || which("codex"),
+  analyzerAvailable: () => which("claude") || which("codex") || which("opencode"),
   scaffold: async (root) => {
     const context = detectInitProjectContext(root, authoringAgent());
     await Bun.write(join(root, ".webmux.yaml"), buildStarterTemplate(context));

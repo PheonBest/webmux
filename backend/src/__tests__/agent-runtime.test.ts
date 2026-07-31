@@ -81,6 +81,37 @@ describe("ensureAgentRuntimeArtifacts", () => {
     expect(codexHooks.hooks?.PostToolUse?.[0]?.hooks?.[0]?.command).toContain("codex-post-tool-use");
     expect(codexHooks.hooks?.PostToolUse?.[0]?.hooks?.[0]?.timeout).toBe(30);
     expect(await Bun.file(join(gitDir, "info", "exclude")).text()).toContain(".codex/hooks.json");
+
+    const pluginSource = await Bun.file(artifacts.opencodePluginPath).text();
+    expect(pluginSource).toContain("webmux-agentctl");
+    expect(pluginSource).toContain("session.idle");
+    expect(pluginSource).toContain("tool.execute.before");
+    expect(pluginSource).toContain("tool.execute.after");
+
+    const opencodeConfig = await Bun.file(artifacts.opencodeConfigPath).json() as { plugin?: string[] };
+    expect(opencodeConfig.plugin).toContain("./.opencode/plugin/webmux.ts");
+  });
+
+  it("registers the webmux plugin in an existing opencode.json without dropping other config", async () => {
+    const gitDir = await mkdtemp(join(tmpdir(), "webmux-agent-runtime-gitdir-"));
+    const worktreePath = await mkdtemp(join(tmpdir(), "webmux-agent-runtime-worktree-"));
+    tempDirs.push(gitDir, worktreePath);
+
+    await Bun.write(
+      join(worktreePath, "opencode.json"),
+      JSON.stringify({ theme: "dark", plugin: ["./.opencode/plugin/other.ts"] }, null, 2) + "\n",
+    );
+
+    await ensureWorktreeStorageDirs(gitDir);
+    const artifacts = await ensureAgentRuntimeArtifacts({ gitDir, worktreePath });
+    await ensureAgentRuntimeArtifacts({ gitDir, worktreePath });
+
+    const opencodeConfig = await Bun.file(artifacts.opencodeConfigPath).json() as {
+      theme?: string;
+      plugin?: string[];
+    };
+    expect(opencodeConfig.theme).toBe("dark");
+    expect(opencodeConfig.plugin).toEqual(["./.opencode/plugin/other.ts", "./.opencode/plugin/webmux.ts"]);
   });
 
   it("preserves non-webmux Codex hooks when refreshing generated hooks", async () => {

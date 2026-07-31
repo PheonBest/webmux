@@ -19,7 +19,7 @@ export const EnabledResponseSchema = z.object({
   enabled: z.boolean(),
 });
 
-export const BuiltInAgentIdSchema = z.enum(["claude", "codex"]);
+export const BuiltInAgentIdSchema = z.enum(["claude", "codex", "opencode"]);
 export const AgentIdSchema = z.string().trim().min(1);
 export const AgentKindSchema = BuiltInAgentIdSchema;
 export const WorktreeCreateModeSchema = z.enum(["new", "existing"]);
@@ -315,7 +315,7 @@ export const LinearIssuesResponseSchema = z.object({
   issues: z.array(LinearIssueSchema),
 });
 
-export const AutoNameProviderSchema = z.enum(["claude", "codex"]);
+export const AutoNameProviderSchema = z.enum(["claude", "codex", "opencode"]);
 
 export const AutoNameConfigResponseSchema = z.object({
   autoName: z.object({
@@ -389,7 +389,7 @@ export const ProjectSnapshotSchema = z.object({
   notifications: z.array(AppNotificationSchema),
 });
 
-export const WorktreeConversationProviderSchema = z.enum(["codexAppServer", "claudeCode"]);
+export const WorktreeConversationProviderSchema = z.enum(["codexAppServer", "claudeCode", "opencodeServer"]);
 
 export const CodexWorktreeConversationRefSchema = z.object({
   provider: z.literal("codexAppServer"),
@@ -407,9 +407,18 @@ export const ClaudeWorktreeConversationRefSchema = z.object({
   sessionId: z.string(),
 });
 
+export const OpencodeWorktreeConversationRefSchema = z.object({
+  provider: z.literal("opencodeServer"),
+  conversationId: z.string(),
+  cwd: z.string(),
+  lastSeenAt: z.string(),
+  sessionId: z.string(),
+});
+
 export const WorktreeConversationRefSchema = z.discriminatedUnion("provider", [
   CodexWorktreeConversationRefSchema,
   ClaudeWorktreeConversationRefSchema,
+  OpencodeWorktreeConversationRefSchema,
 ]);
 
 export const AgentsUiWorktreeSummarySchema = z.object({

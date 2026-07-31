@@ -7,16 +7,17 @@ import {
   buildManagedShellCommand,
 } from "../services/agent-service";
 
-function builtInAgent(id: "claude" | "codex"): AgentDefinition {
+function builtInAgent(id: "claude" | "codex" | "opencode"): AgentDefinition {
+  const label = id === "claude" ? "Claude" : id === "codex" ? "Codex" : "opencode";
   return {
     id,
-    label: id === "claude" ? "Claude" : "Codex",
+    label,
     kind: "builtin",
     capabilities: {
       terminal: true,
-      inAppChat: true,
-      conversationHistory: true,
-      interrupt: true,
+      inAppChat: id !== "opencode",
+      conversationHistory: id !== "opencode",
+      interrupt: id !== "opencode",
       resume: true,
     },
     implementation: {
@@ -181,6 +182,68 @@ describe("agent-service command builders", () => {
     });
 
     expect(command).toContain("codex --enable hooks resume 'thread-9'");
+  });
+
+  it("builds a fresh opencode command with the prompt as the first message", () => {
+    const command = buildAgentPaneCommand({
+      agent: builtInAgent("opencode"),
+      runtimeEnvPath: "/tmp/gitdir/webmux/runtime.env",
+      repoRoot: "/repo",
+      worktreePath: "/repo/__worktrees/feature",
+      branch: "feature",
+      profileName: "default",
+      prompt: "fix the tests",
+    });
+
+    expect(command).toContain("opencode");
+    expect(command).toContain("fix the tests");
+    expect(command).not.toContain("--continue");
+    expect(command).not.toContain("OPENCODE_PERMISSION");
+  });
+
+  it("sets OPENCODE_PERMISSION as an env prefix for opencode yolo instead of a CLI flag", () => {
+    const command = buildAgentPaneCommand({
+      agent: builtInAgent("opencode"),
+      runtimeEnvPath: "/tmp/gitdir/webmux/runtime.env",
+      repoRoot: "/repo",
+      worktreePath: "/repo/__worktrees/feature",
+      branch: "feature",
+      profileName: "default",
+      yolo: true,
+    });
+
+    expect(command).toContain("OPENCODE_PERMISSION=");
+    expect(command).toContain("opencode");
+  });
+
+  it("resumes opencode via --continue when no session id is known", () => {
+    const command = buildAgentPaneCommand({
+      agent: builtInAgent("opencode"),
+      runtimeEnvPath: "/tmp/gitdir/webmux/runtime.env",
+      repoRoot: "/repo",
+      worktreePath: "/repo/__worktrees/feature",
+      branch: "feature",
+      profileName: "default",
+      launchMode: "resume",
+    });
+
+    expect(command).toContain("opencode --continue");
+  });
+
+  it("resumes a specific opencode session by id and appends the follow-up prompt", () => {
+    const command = buildAgentPaneCommand({
+      agent: builtInAgent("opencode"),
+      runtimeEnvPath: "/tmp/gitdir/webmux/runtime.env",
+      repoRoot: "/repo",
+      worktreePath: "/repo/__worktrees/feature",
+      branch: "feature",
+      profileName: "default",
+      launchMode: "resume",
+      resumeConversationId: "ses_abc123",
+      prompt: "keep going",
+    });
+
+    expect(command).toContain("opencode --session 'ses_abc123' -- 'keep going'");
   });
 
   it("builds docker commands that exec inside the container", () => {

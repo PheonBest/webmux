@@ -66,6 +66,31 @@ const BUILTIN_AGENT_DEFINITIONS: AgentDefinition[] = [
       agent: "codex",
     },
   },
+  {
+    id: "opencode",
+    label: "opencode",
+    kind: "builtin",
+    capabilities: {
+      terminal: true,
+      // opencode's stable public integration surface is a REST+SSE local server
+      // (`opencode serve`, see backend/src/adapters/opencode-server-client.ts),
+      // not the JSON-RPC-over-stdio shape the in-app dashboard chat/interrupt UI
+      // is currently built around (AgentsConversationStreamSession and friends
+      // assume Codex's `item/started` / `turn/started` notification shape).
+      // Terminal launch, resume, and lifecycle-event hooks are fully wired (see
+      // agent-service.ts, agent-runtime.ts, session-discovery.ts); dashboard
+      // in-app chat streaming + interrupt are a follow-up — see
+      // opencode-server-client.ts's module doc for the intended shape.
+      inAppChat: false,
+      conversationHistory: false,
+      interrupt: false,
+      resume: true,
+    },
+    implementation: {
+      type: "builtin",
+      agent: "opencode",
+    },
+  },
 ];
 
 function cloneCapabilities(capabilities: AgentCapabilities): AgentCapabilities {

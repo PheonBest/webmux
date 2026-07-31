@@ -2,9 +2,10 @@ import { readdir, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { isRecord } from "../lib/type-guards";
 import { encodeClaudeProjectDir } from "./claude-cli";
+import { startOpencodeServer, stopOpencodeServer, OpencodeServerClient, OpencodeServerProcessError } from "./opencode-server-client";
 
 /** Built-in agents whose on-disk session history we can discover. */
-export type DiscoverableAgentKind = "claude" | "codex";
+export type DiscoverableAgentKind = "claude" | "codex" | "opencode";
 
 export interface SessionDiscoveryGateway {
   /** Session ids for `cwd`, newest first. Claude reads `~/.claude/projects/<encoded>/`,
@@ -75,9 +76,36 @@ async function listCodexSessionIds(cwd: string): Promise<string[]> {
   return newestFirst(stamped.filter((entry): entry is StampedSession => entry !== null));
 }
 
+/** opencode has no on-disk session index we can read directly (its SQLite store is
+ *  an unstable internal detail, see backend/src/adapters/opencode-server-client.ts) —
+ *  discovery instead briefly spins up `opencode serve` scoped to `cwd` and asks it
+ *  which sessions it knows about for that directory. */
+async function listOpencodeSessionIds(cwd: string): Promise<string[]> {
+  let server: Awaited<ReturnType<typeof startOpencodeServer>>;
+  try {
+    server = await startOpencodeServer(cwd);
+  } catch (error) {
+    if (error instanceof OpencodeServerProcessError) return [];
+    throw error;
+  }
+
+  try {
+    const client = new OpencodeServerClient(server);
+    const sessions = await client.listSessions();
+    const matching = sessions.filter((session) => session.directory === null || session.directory === cwd);
+    return matching
+      .sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0))
+      .map((session) => session.id);
+  } finally {
+    stopOpencodeServer(server);
+  }
+}
+
 export class FileSessionDiscovery implements SessionDiscoveryGateway {
   async listSessionIds(agent: DiscoverableAgentKind, cwd: string): Promise<string[]> {
-    return agent === "claude" ? await listClaudeSessionIds(cwd) : await listCodexSessionIds(cwd);
+    if (agent === "claude") return await listClaudeSessionIds(cwd);
+    if (agent === "opencode") return await listOpencodeSessionIds(cwd);
+    return await listCodexSessionIds(cwd);
   }
 }
 

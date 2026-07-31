@@ -55,7 +55,10 @@
     onAnswerQuestion,
   }: Props = $props();
 
-  const agentLabel = $derived(worktree.agentLabel ?? (worktree.agentName === "claude" ? "Claude" : "Codex"));
+  const agentLabel = $derived(
+    worktree.agentLabel
+      ?? (worktree.agentName === "claude" ? "Claude" : worktree.agentName === "opencode" ? "opencode" : "Codex"),
+  );
   const supportsAgentChat = $derived(worktree.agentName === "codex" || worktree.agentName === "claude");
   const chatAvailable = $derived(supportsAgentChat && worktree.mux === "✓");
   const showInterrupt = $derived(chatAvailable && (conversation?.running ?? false));

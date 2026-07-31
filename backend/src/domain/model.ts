@@ -1,10 +1,10 @@
-import type { AgentId, RuntimeKind } from "./config";
+import type { AgentId, AgentKind, RuntimeKind } from "./config";
 
 export const WORKTREE_META_SCHEMA_VERSION = 1;
 export const WORKTREE_ARCHIVE_STATE_VERSION = 1;
 export const OPEN_SESSIONS_STATE_VERSION = 1;
 
-export type WorktreeConversationProvider = "codexAppServer" | "claudeCode";
+export type WorktreeConversationProvider = "codexAppServer" | "claudeCode" | "opencodeServer";
 
 interface WorktreeConversationMetaBase {
   provider: WorktreeConversationProvider;
@@ -23,9 +23,18 @@ export interface ClaudeWorktreeConversationMeta extends WorktreeConversationMeta
   sessionId: string;
 }
 
+/** OpenCode has no notion of a separate "thread" id like Codex — the session id
+ *  returned by its local HTTP server (`opencode serve`, see
+ *  backend/src/adapters/opencode-server-client.ts) doubles as both. */
+export interface OpencodeWorktreeConversationMeta extends WorktreeConversationMetaBase {
+  provider: "opencodeServer";
+  sessionId: string;
+}
+
 export type WorktreeConversationMeta =
   | CodexWorktreeConversationMeta
-  | ClaudeWorktreeConversationMeta;
+  | ClaudeWorktreeConversationMeta
+  | OpencodeWorktreeConversationMeta;
 
 export type WorktreeTabKind = "root" | "fork";
 
@@ -88,6 +97,12 @@ export const ROOT_TAB_ID = "root";
 export function conversationSessionId(conversation: WorktreeConversationMeta | null | undefined): string | null {
   if (!conversation) return null;
   return conversation.provider === "codexAppServer" ? conversation.threadId : conversation.sessionId;
+}
+
+export function agentKindForConversationProvider(provider: WorktreeConversationProvider): AgentKind {
+  if (provider === "codexAppServer") return "codex";
+  if (provider === "opencodeServer") return "opencode";
+  return "claude";
 }
 
 export interface ArchivedWorktreeEntry {

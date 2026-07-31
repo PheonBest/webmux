@@ -78,6 +78,14 @@ export function buildLlmArgs(config: AutoNameConfig, systemPrompt: string, userP
       userPrompt,
     ];
   }
+  if (config.provider === "opencode") {
+    const args = ["opencode", "run", "--print-logs"];
+    if (config.model) {
+      args.push("--model", config.model);
+    }
+    args.push(`${systemPrompt}\n\n${userPrompt}`);
+    return args;
+  }
   const args = [
     "codex",
     "-c", `developer_instructions="${escapeTomlString(systemPrompt)}"`,
@@ -136,5 +144,7 @@ export async function runShortLlmTask(
 }
 
 export function llmProviderLabel(config: AutoNameConfig): string {
-  return config.provider === "claude" ? "claude" : "codex";
+  if (config.provider === "claude") return "claude";
+  if (config.provider === "opencode") return "opencode";
+  return "codex";
 }

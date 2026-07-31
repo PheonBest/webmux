@@ -1,4 +1,4 @@
-export type AgentKind = "claude" | "codex";
+export type AgentKind = "claude" | "codex" | "opencode";
 export type AgentId = string;
 export type RuntimeKind = "host" | "docker";
 
@@ -88,7 +88,7 @@ export interface LifecycleHooksConfig {
 }
 
 export interface AutoNameConfig {
-  provider: "claude" | "codex";
+  provider: "claude" | "codex" | "opencode";
   model?: string;
   systemPrompt?: string;
 }
