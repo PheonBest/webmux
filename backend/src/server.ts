@@ -1217,8 +1217,9 @@ async function apiListBranches(req: Request): Promise<Response> {
   if (!parsed.ok) return parsed.response;
 
   const includeRemote = parsed.data.includeRemote === true;
+  const excludeProjectRoot = parsed.data.mode === "direct";
   return jsonResponse({
-    branches: lifecycleService.listAvailableBranches({ includeRemote }),
+    branches: lifecycleService.listAvailableBranches({ includeRemote, excludeProjectRoot }),
   });
 }
 

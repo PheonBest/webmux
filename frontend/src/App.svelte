@@ -150,10 +150,11 @@
   let baseBranchesError = $state<string | null>(null);
   let lockedBaseBranch = $state<string | null>(null);
   let includeRemoteBranches = $state(false);
+  let branchListMode = $state<"existing" | "direct">("existing");
   let searchQuery = $state("");
   let worktreeSearchInput = $state<HTMLInputElement | null>(null);
   let showArchivedWorktrees = $state(false);
-  type BranchCacheKey = "local" | "remote";
+  type BranchCacheKey = "local" | "remote" | "direct-local" | "direct-remote";
   let availableBranchCache: Partial<Record<BranchCacheKey, AvailableBranch[]>> = {};
   let availableBranchRequests: Partial<Record<BranchCacheKey, Promise<AvailableBranch[]>>> = {};
   let baseBranchCache: AvailableBranch[] | null = null;
@@ -197,19 +198,20 @@
     ...uiToasts,
   ]);
 
-  function getAvailableBranchCacheKey(includeRemote: boolean): BranchCacheKey {
+  function getAvailableBranchCacheKey(includeRemote: boolean, mode: "existing" | "direct"): BranchCacheKey {
+    if (mode === "direct") return includeRemote ? "direct-remote" : "direct-local";
     return includeRemote ? "remote" : "local";
   }
 
-  function fetchAvailableBranchesCached(includeRemote: boolean): Promise<AvailableBranch[]> {
-    const key = getAvailableBranchCacheKey(includeRemote);
+  function fetchAvailableBranchesCached(includeRemote: boolean, mode: "existing" | "direct"): Promise<AvailableBranch[]> {
+    const key = getAvailableBranchCacheKey(includeRemote, mode);
     const cached = availableBranchCache[key];
     if (cached) return Promise.resolve(cached);
 
     const inFlight = availableBranchRequests[key];
     if (inFlight) return inFlight;
 
-    const request = api.fetchAvailableBranches({ query: { includeRemote } })
+    const request = api.fetchAvailableBranches({ query: { includeRemote, mode } })
       .then((data) => {
         availableBranchCache[key] = data.branches;
         return data.branches;
@@ -531,7 +533,7 @@
   $effect(() => {
     if (!showCreateDialog) return;
 
-    const cached = availableBranchCache[getAvailableBranchCacheKey(includeRemoteBranches)];
+    const cached = availableBranchCache[getAvailableBranchCacheKey(includeRemoteBranches, branchListMode)];
     if (cached) {
       availableBranches = cached;
       availableBranchesLoading = false;
@@ -543,7 +545,7 @@
     availableBranchesLoading = true;
     availableBranchesError = null;
 
-    fetchAvailableBranchesCached(includeRemoteBranches)
+    fetchAvailableBranchesCached(includeRemoteBranches, branchListMode)
       .then((branches) => {
         if (fetchId !== nextAvailableBranchFetchId) return;
         availableBranches = branches;
@@ -624,6 +626,7 @@
 
   function openCreateDialog(issue: LinearIssue | null = null): void {
     includeRemoteBranches = false;
+    branchListMode = "existing";
     assignIssue = issue;
     lockedBaseBranch = null;
     showCreateDialog = true;
@@ -631,6 +634,7 @@
 
   function openSubworktreeDialog(parentBranch: string): void {
     includeRemoteBranches = false;
+    branchListMode = "existing";
     assignIssue = null;
     lockedBaseBranch = parentBranch;
     showCreateDialog = true;
@@ -1484,6 +1488,7 @@
     initialBranch={assignIssue?.branchName ?? ""}
     initialPrompt={assignIssue ? `${assignIssue.title}${assignIssue.description ? '\n\n' + assignIssue.description : ''}` : ""}
     bind:includeRemoteBranches
+    bind:branchListMode
     {availableBranches}
     {availableBranchesLoading}
     {availableBranchesError}

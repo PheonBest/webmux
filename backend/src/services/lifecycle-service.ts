@@ -208,6 +208,10 @@ export interface PruneWorktreesResult {
 
 export interface ListAvailableBranchesOptions {
   includeRemote?: boolean;
+  /** Direct-mode branch pickers want the project root's own currently-checked-out
+   *  branch to remain selectable (running "directly" on it is exactly the point),
+   *  so it must not be treated as unavailable the way it is for "existing" mode. */
+  excludeProjectRoot?: boolean;
 }
 
 interface ExistingBranchResolution {
@@ -839,7 +843,7 @@ export class LifecycleService {
     const remoteBranches = options.includeRemote
       ? this.listRemoteBranches().filter((branch) => isValidBranchName(branch))
       : [];
-    const checkedOutBranches = this.listCheckedOutBranches();
+    const checkedOutBranches = this.listCheckedOutBranches({ excludeProjectRoot: options.excludeProjectRoot });
 
     const allBranches = [...new Set([...localBranches, ...remoteBranches])];
 

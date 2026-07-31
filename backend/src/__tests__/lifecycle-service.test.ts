@@ -851,6 +851,28 @@ describe("LifecycleService", () => {
     ]);
   });
 
+  it("excludes the project root's own checked-out branch by default but includes it for direct mode", async () => {
+    const repoRoot = await initRepo();
+    const runtime = new ProjectRuntime();
+    const tmux = new FakeTmuxGateway();
+    const lifecycle = makeLifecycleService(repoRoot, tmux, runtime);
+
+    run(["git", "branch", "feature-available", "main"], repoRoot);
+
+    // "main" (checked out in the repo root itself, no separate worktree) must not
+    // appear for "existing" mode — you can't create a worktree for a branch that's
+    // already checked out — but must remain selectable for "direct" mode, since
+    // running directly on the root's own current branch is the entire point.
+    expect(lifecycle.listAvailableBranches()).toEqual([
+      { name: "feature-available" },
+    ]);
+
+    expect(lifecycle.listAvailableBranches({ excludeProjectRoot: true })).toEqual([
+      { name: "feature-available" },
+      { name: "main" },
+    ]);
+  });
+
   it("lists local branches by default and includes remote branches when requested", async () => {
     const repoRoot = await initRepo();
     const remoteRoot = await mkdtemp(join(tmpdir(), "webmux-lifecycle-remote-"));

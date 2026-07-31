@@ -31,6 +31,7 @@
     baseBranchesError = null,
     lockedBaseBranch = null,
     includeRemoteBranches = $bindable(false),
+    branchListMode = $bindable<"existing" | "direct">("existing"),
     startupEnvs = {},
     linearCreateTicketOption = false,
     openedFromLinearIssue = false,
@@ -52,6 +53,7 @@
     baseBranchesError?: string | null;
     lockedBaseBranch?: string | null;
     includeRemoteBranches: boolean;
+    branchListMode?: "existing" | "direct";
     startupEnvs?: Record<string, string | boolean>;
     linearCreateTicketOption?: boolean;
     openedFromLinearIssue?: boolean;
@@ -226,6 +228,7 @@
 
   function openExistingBranchSelector(): void {
     mode = "existing";
+    branchListMode = "existing";
     if (!selectedExistingBranch && initialBranch.trim().length > 0) {
       selectedExistingBranch = initialBranch.trim();
     }
@@ -233,6 +236,7 @@
 
   function openDirectBranchSelector(): void {
     mode = "direct";
+    branchListMode = "direct";
     if (!selectedExistingBranch && initialBranch.trim().length > 0) {
       selectedExistingBranch = initialBranch.trim();
     }

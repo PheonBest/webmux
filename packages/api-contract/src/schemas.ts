@@ -130,6 +130,9 @@ export const AvailableBranchSchema = z.object({
 
 export const AvailableBranchesQuerySchema = z.object({
   includeRemote: BooleanLikeSchema.optional(),
+  /** "direct" keeps the project root's own checked-out branch selectable —
+   *  running directly on it is the whole point of that mode. */
+  mode: WorktreeCreateModeSchema.optional(),
 });
 
 const NumberLikePathParamSchema = z.union([

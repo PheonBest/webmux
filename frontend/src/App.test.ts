@@ -1015,7 +1015,7 @@ describe("App create selection", () => {
 
     await waitFor(() => {
       expect(api.fetchAvailableBranches).toHaveBeenCalledTimes(1);
-      expect(api.fetchAvailableBranches).toHaveBeenCalledWith({ query: { includeRemote: false } });
+      expect(api.fetchAvailableBranches).toHaveBeenCalledWith({ query: { includeRemote: false, mode: "existing" } });
       expect(api.fetchBaseBranches).toHaveBeenCalledTimes(1);
     });
 
@@ -1024,7 +1024,7 @@ describe("App create selection", () => {
 
     await waitFor(() => {
       expect(api.fetchAvailableBranches).toHaveBeenCalledTimes(2);
-      expect(api.fetchAvailableBranches).toHaveBeenLastCalledWith({ query: { includeRemote: true } });
+      expect(api.fetchAvailableBranches).toHaveBeenLastCalledWith({ query: { includeRemote: true, mode: "existing" } });
     });
 
     await fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
