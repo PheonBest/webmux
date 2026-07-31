@@ -23,6 +23,7 @@ const AGENTS: AgentSummary[] = [
 function renderDialog(overrides: {
   oncreate?: (request: CreateWorktreeRequest) => void;
   oncancel?: () => void;
+  groupMultiAgentEnabled?: boolean;
 } = {}): { oncreate: ReturnType<typeof vi.fn> } {
   const oncreate = overrides.oncreate ?? vi.fn();
   render(CreateWorktreeDialog, {
@@ -35,6 +36,9 @@ function renderDialog(overrides: {
       includeRemoteBranches: false,
       oncreate,
       oncancel: overrides.oncancel ?? vi.fn(),
+      ...(overrides.groupMultiAgentEnabled !== undefined
+        ? { groupMultiAgentEnabled: overrides.groupMultiAgentEnabled }
+        : {}),
     },
   });
   return { oncreate: oncreate as ReturnType<typeof vi.fn> };
@@ -97,28 +101,62 @@ describe("CreateWorktreeDialog — direct mode", () => {
     expect(screen.getByRole("button", { name: "Create" })).not.toBeDisabled();
   });
 
-  it("disables multiple agent selection while in direct mode", async () => {
+  it("keeps multiple agent selection enabled in direct mode when grouped (default)", async () => {
     renderDialog();
 
     await fireEvent.click(screen.getByText("Run directly on branch (no worktree)"));
 
-    // A direct session can only ever have one agent (there's only one
-    // checkout to run it in) — the toggle must be unusable, not just
-    // reactively undone after the fact, so users don't land in a state
-    // where their branch/mode choice silently reverted.
+    // Grouped mode (WEBMUX_GROUP_MULTI_AGENT_SESSION default on): multiple
+    // agents share ONE branch/worktree, so there's no conflict with direct
+    // mode's one-branch semantics — the toggle stays usable.
+    expect(screen.getByLabelText("Enable multiple agent selection")).not.toBeDisabled();
+  });
+
+  it("keeps multiple agent selection enabled in existing-branch mode when grouped (default)", async () => {
+    renderDialog();
+
+    await fireEvent.click(screen.getByText("Use existing branch"));
+
+    expect(screen.getByLabelText("Enable multiple agent selection")).not.toBeDisabled();
+  });
+
+  it("submits one branch with multiple agents selected in direct mode when grouped", async () => {
+    const { oncreate } = renderDialog();
+
+    await fireEvent.click(screen.getByText("Run directly on branch (no worktree)"));
+    await fireEvent.click(screen.getByText("main"));
+    await fireEvent.click(screen.getByLabelText("Enable multiple agent selection"));
+    await fireEvent.click(screen.getByLabelText("Codex"));
+    await fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    expect(oncreate).toHaveBeenCalledTimes(1);
+    const request = oncreate.mock.calls[0][0] as CreateWorktreeRequest;
+    expect(request.mode).toBe("direct");
+    expect(request.branch).toBe("main");
+    expect(request.agents).toEqual(["claude", "codex"]);
+  });
+
+  it("disables multiple agent selection while in direct mode (legacy flag off)", async () => {
+    renderDialog({ groupMultiAgentEnabled: false });
+
+    await fireEvent.click(screen.getByText("Run directly on branch (no worktree)"));
+
+    // Legacy (ungrouped) mode: multiple agents each need their own branch —
+    // the toggle must be unusable, not just reactively undone after the
+    // fact, so users don't land in a state where their choice silently reverted.
     expect(screen.getByLabelText("Enable multiple agent selection")).toBeDisabled();
   });
 
-  it("disables multiple agent selection while in existing-branch mode", async () => {
-    renderDialog();
+  it("disables multiple agent selection while in existing-branch mode (legacy flag off)", async () => {
+    renderDialog({ groupMultiAgentEnabled: false });
 
     await fireEvent.click(screen.getByText("Use existing branch"));
 
     expect(screen.getByLabelText("Enable multiple agent selection")).toBeDisabled();
   });
 
-  it("turns off multiple agent selection when switching to direct mode", async () => {
-    renderDialog();
+  it("turns off multiple agent selection when switching to direct mode (legacy flag off)", async () => {
+    renderDialog({ groupMultiAgentEnabled: false });
 
     // Multi-select on with only one agent actually checked: the "run
     // directly"/"use existing" links are still offered at this point (they

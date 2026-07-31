@@ -38,29 +38,45 @@ function isRouteResponse(value: unknown): value is RouteResponse {
     && "body" in value;
 }
 
+/** Thrown for any non-2xx API response. `code`, when present, is a
+ *  machine-readable error code (e.g. "direct_switch_dirty") the server
+ *  attached so callers can branch on a specific failure instead of
+ *  string-matching `message` — see ErrorResponseSchema. */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 function unwrapResponse(response: unknown): unknown {
   if (!isRouteResponse(response)) {
     throw new Error("Malformed API client response");
   }
   if (response.status < 200 || response.status >= 300) {
-    throw new Error(errorMessageFromResponse(response.body, response.status));
+    const { message, code } = errorDetailsFromResponse(response.body, response.status);
+    throw new ApiError(message, response.status, code);
   }
   return response.body;
 }
 
-function errorMessageFromResponse(body: unknown, status: number): string {
+function errorDetailsFromResponse(body: unknown, status: number): { message: string; code?: string } {
   if (typeof body === "string") {
     try {
-      const parsed = JSON.parse(body) as unknown;
-      return errorMessageFromResponse(parsed, status);
+      return errorDetailsFromResponse(JSON.parse(body) as unknown, status);
     } catch {
-      return body.trim() || `HTTP ${status}`;
+      return { message: body.trim() || `HTTP ${status}` };
     }
   }
   if (body && typeof body === "object" && "error" in body && typeof body.error === "string") {
-    return body.error;
+    const code = "code" in body && typeof body.code === "string" ? body.code : undefined;
+    return { message: body.error, ...(code ? { code } : {}) };
   }
-  return `HTTP ${status}`;
+  return { message: `HTTP ${status}` };
 }
 
 // ts-rest interpolates path params verbatim, so names like `feature/foo`

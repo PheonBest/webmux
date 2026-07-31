@@ -22,8 +22,11 @@ import type { AgentId, ProfileConfig, ProjectConfig, RuntimeKind } from "../doma
 import { ROOT_TAB_ID, type ControlEnvMap, type OneshotMeta, type WorktreeCreationPhase, type WorktreeMeta, type WorktreeSource, type WorktreeTab } from "../domain/model";
 import {
   activeTabId as readActiveTabId,
+  appendAgentWindowTab,
   appendTab,
+  buildAgentWindowTab,
   buildForkTab,
+  findAgentWindowTab,
   findTab,
   listTabs,
   nextForkSeq,
@@ -54,10 +57,24 @@ import {
   type InitializeManagedWorktreeResult,
 } from "./worktree-service";
 import { log } from "../lib/log";
-import { generateFallbackBranchName } from "../lib/branch-name";
+import { generateFallbackBranchName, generateRecoveryBranchName } from "../lib/branch-name";
 
 const DOCKER_CONTROL_HOST = "host.docker.internal";
 const MAX_WORKTREE_LABEL_LENGTH = 80;
+
+/** Feature flag for grouping multiple selected agents into ONE
+ *  workflow/branch/worktree (each agent gets its own tmux window) instead of
+ *  the legacy behavior of creating N separate branches/worktrees, one per
+ *  agent. Default ON. Set WEBMUX_GROUP_MULTI_AGENT_SESSION=false (or "0") to
+ *  fall back to the legacy N-branches behavior. Read once per call (cheap env
+ *  lookup) rather than cached, so tests can toggle it via Bun.env freely. */
+export function isGroupMultiAgentSessionEnabled(): boolean {
+  const raw = Bun.env.WEBMUX_GROUP_MULTI_AGENT_SESSION;
+  if (raw === undefined) return true;
+  return raw !== "false" && raw !== "0";
+}
+
+export const DIRECT_SWITCH_DIRTY_ERROR_CODE = "direct_switch_dirty";
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -123,13 +140,28 @@ export function prefixAgentBranch(agent: AgentId, branch: string): string {
   return `${agent}-${branch}`;
 }
 
+/** Resolve N selected agents to the branch(es)/worktree(s) that must be
+ *  created for them. When `groupMultiAgent` is true (the
+ *  WEBMUX_GROUP_MULTI_AGENT_SESSION default) and more than one agent is
+ *  selected, this returns a SINGLE target for the first ("primary") agent —
+ *  the caller is responsible for giving the remaining agents their own tmux
+ *  windows within that one worktree afterwards (see
+ *  `LifecycleService.createWorktrees` / `addAgentWindow`), rather than this
+ *  function creating N separate prefixed branches the old way. Passing
+ *  `groupMultiAgent: false` preserves the legacy N-branches behavior. */
 export function buildCreateWorktreeTargets(
   branch: string,
   agentIds: AgentId[],
+  groupMultiAgent = true,
 ): CreateWorktreeTarget[] {
   if (agentIds.length <= 1) {
     const agent = agentIds[0];
     return agent ? [{ branch, agent }] : [];
+  }
+
+  if (groupMultiAgent) {
+    const primary = agentIds[0];
+    return primary ? [{ branch, agent: primary }] : [];
   }
 
   return agentIds.map((agent) => ({
@@ -223,6 +255,10 @@ export class LifecycleError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    /** Optional machine-readable code so callers (frontend, CLI) can branch on
+     *  a specific failure without string-matching `message`. See
+     *  DIRECT_SWITCH_DIRTY_ERROR_CODE for the one currently defined. */
+    readonly code?: string,
   ) {
     super(message);
   }
@@ -234,12 +270,13 @@ export class LifecycleService {
   async createWorktrees(input: CreateLifecycleWorktreesInput): Promise<CreateLifecycleWorktreesResult> {
     const mode = input.mode ?? "new";
     const agentIds = this.resolveSelectedAgents(input);
-    if (agentIds.length > 1 && (mode === "existing" || mode === "direct")) {
+    const groupMultiAgent = isGroupMultiAgentSessionEnabled();
+    if (agentIds.length > 1 && !groupMultiAgent && (mode === "existing" || mode === "direct")) {
       throw new LifecycleError("Creating multiple agents is only supported for new worktrees", 400);
     }
 
     const branch = await this.resolveBranch(input.branch, input.prompt, mode);
-    const targets = buildCreateWorktreeTargets(branch, agentIds);
+    const targets = buildCreateWorktreeTargets(branch, agentIds, groupMultiAgent);
     const createdBranches: string[] = [];
 
     try {
@@ -251,6 +288,16 @@ export class LifecycleService {
           agent: target.agent,
         });
         createdBranches.push(created.branch);
+      }
+
+      // Grouped multi-agent: one branch/worktree was created above for the
+      // primary agent — give every remaining selected agent its own tmux
+      // window in that same worktree instead of a separate branch.
+      if (groupMultiAgent && agentIds.length > 1) {
+        const primaryBranch = createdBranches[0];
+        for (const extraAgentId of agentIds.slice(1)) {
+          await this.addAgentWindow(primaryBranch, extraAgentId, { prompt: input.prompt });
+        }
       }
     } catch (error) {
       const rollbackError = await this.rollbackCreatedWorktrees(createdBranches);
@@ -264,6 +311,78 @@ export class LifecycleService {
       primaryBranch: createdBranches[0],
       branches: createdBranches,
     };
+  }
+
+  /** Give an extra agent its own real tmux window within an already-open
+   *  worktree (the "group multiple agents into one workflow" feature — see
+   *  WEBMUX_GROUP_MULTI_AGENT_SESSION). Unlike a fork tab (same agent, swapped
+   *  pane), this is a genuinely different agent with its own window, created
+   *  via `buildWorktreeWindowName(branch, agentId)`. Idempotent: re-adding an
+   *  agent that already has a window is a no-op returning the existing tab. */
+  async addAgentWindow(
+    branch: string,
+    agentId: AgentId,
+    options: { prompt?: string } = {},
+  ): Promise<{ tab: WorktreeTab }> {
+    try {
+      const resolved = await this.resolveExistingWorktree(branch);
+      if (!resolved.meta) throw new LifecycleError(`Worktree ${branch} has no managed metadata`, 409);
+
+      const existing = findAgentWindowTab(resolved.meta, agentId);
+      if (existing) return { tab: existing };
+
+      const { profileName, profile } = this.resolveProfile(resolved.meta.profile);
+      if (profile.runtime === "docker") {
+        throw new LifecycleError("Agent windows are not supported for Docker worktrees", 409);
+      }
+      const agent = this.resolveAgentDefinition(agentId);
+
+      const initialized = await this.refreshManagedArtifacts(resolved);
+      await ensureAgentRuntimeArtifacts({
+        gitDir: initialized.paths.gitDir,
+        worktreePath: resolved.entry.path,
+      });
+
+      const sessionName = buildProjectSessionName(this.deps.projectRoot);
+      const windowName = buildWorktreeWindowName(branch, agentId);
+      if (this.deps.tmux.hasWindow(sessionName, windowName)) {
+        throw new LifecycleError(`A tmux window already exists for ${branch}/${agentId}`, 409);
+      }
+
+      const agentCommand = buildAgentPaneCommand({
+        agent,
+        runtimeEnvPath: initialized.paths.runtimeEnvPath,
+        repoRoot: this.deps.projectRoot,
+        worktreePath: resolved.entry.path,
+        branch,
+        profileName,
+        yolo: profile.yolo === true,
+        launchMode: "fresh",
+        prompt: options.prompt,
+      });
+
+      this.deps.tmux.createWindow({
+        sessionName,
+        windowName,
+        cwd: resolved.entry.path,
+        command: buildManagedShellCommand(initialized.paths.runtimeEnvPath),
+      });
+      this.deps.tmux.runCommand(`${sessionName}:${windowName}.0`, agentCommand);
+
+      const tab = buildAgentWindowTab({
+        agentId,
+        label: agent.label,
+        windowName,
+        createdAt: new Date().toISOString(),
+      });
+      const nextMeta = appendAgentWindowTab(resolved.meta, tab);
+      await writeWorktreeMeta(resolved.gitDir, nextMeta);
+      await this.deps.reconciliation.reconcile(this.deps.projectRoot, { force: true });
+
+      return { tab };
+    } catch (error) {
+      throw this.wrapOperationError(error);
+    }
   }
 
   async createWorktree(input: CreateLifecycleWorktreeInput): Promise<{
@@ -525,6 +644,131 @@ export class LifecycleService {
     } catch (error) {
       throw this.wrapOperationError(error);
     }
+  }
+
+  /** Recover from a blocked direct-mode branch switch (see
+   *  `prepareDirectSessionSwitch` / DIRECT_SWITCH_DIRTY_ERROR_CODE) by
+   *  relocating the main repo root's uncommitted changes into a brand new
+   *  temporary worktree and launching an agent there to help triage them —
+   *  so the user isn't stuck while the original switch stays blocked pending
+   *  that resolution. This is an explicit, opt-in action (a distinct
+   *  endpoint the frontend calls after showing a "Resolve in a new worktree"
+   *  button), not something the blocked switch triggers automatically — see
+   *  docs on the endpoint in server.ts for why. */
+  async recoverDirectSwitchConflict(input: {
+    targetBranch: string;
+    prompt?: string;
+  }): Promise<{ branch: string; worktreeId: string }> {
+    try {
+      const projectRoot = resolve(this.deps.projectRoot);
+      if (!this.deps.git.hasUncommittedTrackedChanges(projectRoot)) {
+        throw new LifecycleError(
+          "The main repo has no uncommitted changes blocking a direct-mode switch — nothing to recover.",
+          409,
+        );
+      }
+      const currentBranch = this.deps.git.currentBranch(projectRoot);
+      if (!currentBranch) {
+        throw new LifecycleError(
+          "Cannot relocate uncommitted changes: the main repo is in detached HEAD, so there is no branch to base the recovery worktree on.",
+          409,
+        );
+      }
+
+      const tempBranch = generateRecoveryBranchName(currentBranch);
+      const worktreePath = this.resolveWorktreePath(tempBranch, "existing");
+      await mkdir(dirname(worktreePath), { recursive: true });
+
+      // Step 1: safely move the uncommitted changes out of the root (stash,
+      // create the worktree, apply the stash there — never discards on
+      // failure, see relocateUncommittedChangesToWorktree).
+      this.deps.git.relocateUncommittedChangesToWorktree({
+        repoRoot: projectRoot,
+        worktreePath,
+        branch: tempBranch,
+        baseBranch: currentBranch,
+      });
+
+      // Step 2: bring the new worktree into webmux's normal managed-worktree
+      // lifecycle (meta/runtime-env/tmux window), reusing the same
+      // createManagedWorktree + agent-launch pipeline a normal "New Worktree"
+      // uses — just skipping createManagedWorktree's own `git worktree add`
+      // since relocateUncommittedChangesToWorktree already did it.
+      const { profileName, profile } = this.resolveProfile(undefined);
+      const rootDirectMeta = await this.readRootDirectMeta();
+      const agent = this.resolveAgentDefinition(rootDirectMeta?.agent);
+
+      let initialized = await createManagedWorktree(
+        {
+          repoRoot: this.deps.projectRoot,
+          worktreePath,
+          branch: tempBranch,
+          mode: "existing",
+          profile: profileName,
+          agent: agent.id,
+          runtime: profile.runtime,
+          startupEnvValues: await this.buildStartupEnvValues(undefined),
+          allocatedPorts: await this.allocatePorts(),
+          runtimeEnvExtras: { WEBMUX_WORKTREE_PATH: worktreePath },
+          ...(await this.controlEnvFields(profile.runtime)),
+          source: "ui",
+          skipGitCreate: true,
+        },
+        { git: this.deps.git },
+      );
+
+      await this.runLifecycleHook({
+        name: "postCreate",
+        command: this.deps.config.lifecycleHooks.postCreate,
+        meta: initialized.meta,
+        worktreePath,
+      });
+
+      initialized = await this.refreshManagedArtifactsFromMeta({
+        gitDir: initialized.paths.gitDir,
+        meta: initialized.meta,
+        worktreePath,
+      });
+      await ensureAgentRuntimeArtifacts({ gitDir: initialized.paths.gitDir, worktreePath });
+
+      const recoveryPrompt = input.prompt?.trim() || this.buildDirtySwitchRecoveryPrompt({
+        currentBranch,
+        targetBranch: input.targetBranch,
+        worktreePath,
+      });
+
+      await this.materializeRuntimeSession({
+        branch: tempBranch,
+        profileName,
+        profile,
+        agent,
+        initialized,
+        worktreePath,
+        creationPrompt: recoveryPrompt,
+        launchMode: "fresh",
+        source: "ui",
+      });
+
+      await this.deps.reconciliation.reconcile(this.deps.projectRoot, { force: true });
+
+      return { branch: tempBranch, worktreeId: initialized.meta.worktreeId };
+    } catch (error) {
+      throw this.wrapOperationError(error);
+    }
+  }
+
+  private buildDirtySwitchRecoveryPrompt(input: {
+    currentBranch: string;
+    targetBranch: string;
+    worktreePath: string;
+  }): string {
+    return [
+      `This worktree was auto-created because branch '${input.currentBranch}' had uncommitted changes`,
+      `blocking a direct-mode switch to '${input.targetBranch}' in the main repo.`,
+      `Those changes have been restored here (via 'git stash apply') at ${input.worktreePath}.`,
+      `Please help me review and resolve them — commit, discard on purpose, or split out —`,
+      `so I can retry the original switch to '${input.targetBranch}' in the main repo once this worktree is clean.`,
+    ].join(" ");
   }
 
   private async readMetaOrThrow(gitDir: string): Promise<WorktreeMeta> {
@@ -1022,8 +1266,9 @@ export class LifecycleService {
         ? `:\n${trackedChanges.slice(0, 10).join("\n")}${trackedChanges.length > 10 ? `\n… and ${trackedChanges.length - 10} more` : ""}`
         : ".";
       throw new LifecycleError(
-        `Cannot switch the main repo from '${currentBranch || "(detached HEAD)"}' to '${targetBranch}' — it has uncommitted changes${changesSummary} Commit or stash them first.`,
+        `Cannot switch the main repo from '${currentBranch || "(detached HEAD)"}' to '${targetBranch}' — it has uncommitted changes${changesSummary} Commit or stash them first, or resolve them in a new worktree.`,
         409,
+        DIRECT_SWITCH_DIRTY_ERROR_CODE,
       );
     }
 

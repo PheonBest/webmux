@@ -12,6 +12,8 @@ A web dashboard for managing parallel AI coding agents. webmux owns git worktree
 
 Spin up new worktrees with one click. Pick a profile, type a prompt, and webmux creates the worktree, starts the agent, and begins streaming output. Changed your mind about the profile? Switch it later from the worktree menu (or `webmux profile <branch> <profile>`) — the session restarts with the new pane layout and commands, resuming the agent conversation. Merge or remove worktrees when you're done.
 
+Selecting multiple agents creates **one** workflow — one branch/worktree, one tmux window per agent, switchable via tabs — instead of a separate branch per agent, and works for new, existing, and direct (no-worktree) branches alike. Set `WEBMUX_GROUP_MULTI_AGENT_SESSION=false` to fall back to the legacy behavior of one branch per agent (only supported for new branches).
+
 ### Embedded Terminals
 
 View and interact with your agents directly in the browser. Each worktree gets its own terminal session, streamed live via WebSocket. You can watch agents work, send prompts, and switch between worktrees instantly — no need to juggle tmux windows manually.

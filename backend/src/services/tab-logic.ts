@@ -1,3 +1,4 @@
+import type { AgentId } from "../domain/config";
 import { ROOT_TAB_ID, type WorktreeMeta, type WorktreeTab } from "../domain/model";
 
 /** Pure helpers for reading and transforming a worktree's tab list. All return
@@ -49,6 +50,48 @@ export function appendTab(meta: WorktreeMeta, tab: WorktreeTab): WorktreeMeta {
     tabs: [...listTabs(meta), tab],
     forkCounter: tab.seq ?? meta.forkCounter ?? 0,
     activeTabId: tab.tabId,
+  };
+}
+
+/** Deterministic tab id for an agent's extra window — one per (worktree,
+ *  agentId), so re-adding the same agent is idempotent/detectable. */
+export function agentWindowTabId(agentId: AgentId): string {
+  return `agent-window-${agentId}`;
+}
+
+export function findAgentWindowTab(meta: WorktreeMeta, agentId: AgentId): WorktreeTab | undefined {
+  return listTabs(meta).find((tab) => tab.kind === "agent-window" && tab.agentId === agentId);
+}
+
+/** Build an `agent-window` tab: a *different* agent's own real tmux window
+ *  within the same worktree (see WorktreeTabKind in domain/model.ts). Unlike
+ *  `buildForkTab`, this doesn't consume the fork-numbering counter — forks and
+ *  agent windows are independent tab families. */
+export function buildAgentWindowTab(input: {
+  agentId: AgentId;
+  label: string;
+  windowName: string;
+  createdAt: string;
+}): WorktreeTab {
+  return {
+    tabId: agentWindowTabId(input.agentId),
+    kind: "agent-window",
+    label: input.label,
+    seq: null,
+    sessionId: null,
+    agentId: input.agentId,
+    windowName: input.windowName,
+    createdAt: input.createdAt,
+  };
+}
+
+/** Append an agent-window tab without disturbing the current active tab
+ *  (unlike `appendTab`/fork creation, adding an extra agent window shouldn't
+ *  steal focus from whatever the user is looking at). */
+export function appendAgentWindowTab(meta: WorktreeMeta, tab: WorktreeTab): WorktreeMeta {
+  return {
+    ...meta,
+    tabs: [...listTabs(meta), tab],
   };
 }
 

@@ -98,6 +98,20 @@ vi.mock("@xterm/addon-web-links", () => ({
   WebLinksAddon: class MockWebLinksAddon {},
 }));
 
+const { MockApiError } = vi.hoisted(() => {
+  class MockApiError extends Error {
+    status: number;
+    code?: string;
+    constructor(message: string, status: number, code?: string) {
+      super(message);
+      this.name = "ApiError";
+      this.status = status;
+      this.code = code;
+    }
+  }
+  return { MockApiError };
+});
+
 vi.mock("./lib/api", () => ({
   api: {
     closeWorktree: vi.fn(),
@@ -116,14 +130,20 @@ vi.mock("./lib/api", () => ({
     setWorktreeArchived: vi.fn(),
     sendWorktreePrompt: vi.fn(),
   },
+  ApiError: MockApiError,
   attachWorktreeConversation: vi.fn(),
   connectWorktreeConversationStream: vi.fn(),
+  createWorktreeTab: vi.fn(),
+  deleteWorktreeTab: vi.fn(),
   fetchWorktreeConversationHistory: vi.fn(),
   fetchWorktrees: vi.fn(),
   interruptWorktreeConversation: vi.fn(),
+  recoverDirectSwitch: vi.fn(),
   refreshWorktreeAgentTerminal: vi.fn(),
+  selectWorktreeTab: vi.fn(),
   sendWorktreeConversationMessage: vi.fn(),
   setWorktreeLabel: vi.fn(),
+  setWorktreeOrder: vi.fn(),
   setWorktreeProfile: vi.fn(),
   postWorktreeToLinear: vi.fn(),
   subscribeNotifications: vi.fn(),
@@ -139,10 +159,12 @@ vi.mock("./lib/api", () => ({
 import App from "./App.svelte";
 import {
   api,
+  ApiError,
   attachWorktreeConversation,
   connectWorktreeConversationStream,
   fetchWorktrees,
   postWorktreeToLinear,
+  recoverDirectSwitch,
   refreshWorktreeAgentTerminal,
   setWorktreeLabel,
   setWorktreeProfile,
@@ -229,6 +251,7 @@ function createConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     autoRemoveOnMerge: false,
     projectDir: "/repo",
     mainBranch: "main",
+    groupMultiAgentSingleWorkflow: true,
     ...overrides,
   };
 }
@@ -547,6 +570,64 @@ describe("App create selection", () => {
 
     const toast = await screen.findByRole("alert");
     expect(toast).toHaveTextContent("Failed to create: branch exists");
+  });
+
+  it("offers recovery into a new worktree when a direct-mode switch is blocked by uncommitted changes", async () => {
+    vi.mocked(fetchWorktrees).mockResolvedValue([]);
+    vi.mocked(api.fetchAvailableBranches).mockResolvedValue({ branches: [{ name: "main" }] });
+    vi.mocked(api.createWorktree).mockRejectedValueOnce(
+      new ApiError("has uncommitted changes", 409, "direct_switch_dirty"),
+    );
+    vi.mocked(recoverDirectSwitch).mockResolvedValueOnce({
+      branch: "resolve-main-abc123",
+      worktreeId: "wt-1",
+    });
+    const confirmSpy = vi.fn().mockReturnValue(true);
+    vi.stubGlobal("confirm", confirmSpy);
+
+    render(App);
+
+    await screen.findByText("Select a worktree");
+    await fireEvent.click(screen.getByTitle("New Worktree (Cmd+K)"));
+    await screen.findByText("New Worktree");
+    await fireEvent.click(screen.getByText("Run directly on branch (no worktree)"));
+    await fireEvent.click(await screen.findByRole("button", { name: "main" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() => {
+      expect(confirmSpy).toHaveBeenCalled();
+      expect(recoverDirectSwitch).toHaveBeenCalledWith("main");
+    });
+
+    const toast = await screen.findByRole("alert");
+    expect(toast).toHaveTextContent("resolve-main-abc123");
+
+    vi.unstubAllGlobals();
+  });
+
+  it("declining recovery leaves a plain error toast for a blocked direct-mode switch", async () => {
+    vi.mocked(fetchWorktrees).mockResolvedValue([]);
+    vi.mocked(api.fetchAvailableBranches).mockResolvedValue({ branches: [{ name: "main" }] });
+    vi.mocked(api.createWorktree).mockRejectedValueOnce(
+      new ApiError("has uncommitted changes", 409, "direct_switch_dirty"),
+    );
+    const confirmSpy = vi.fn().mockReturnValue(false);
+    vi.stubGlobal("confirm", confirmSpy);
+
+    render(App);
+
+    await screen.findByText("Select a worktree");
+    await fireEvent.click(screen.getByTitle("New Worktree (Cmd+K)"));
+    await screen.findByText("New Worktree");
+    await fireEvent.click(screen.getByText("Run directly on branch (no worktree)"));
+    await fireEvent.click(await screen.findByRole("button", { name: "main" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    const toast = await screen.findByRole("alert");
+    expect(toast).toHaveTextContent("has uncommitted changes");
+    expect(recoverDirectSwitch).not.toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
   });
 
   it("dismisses notification toasts through the notification API", async () => {
@@ -923,7 +1004,27 @@ describe("App create selection", () => {
     });
   });
 
-  it("shows prefixed branch previews when multiple agents are selected", async () => {
+  it("shows one agent-windows note (not prefixed branch previews) when grouped (default)", async () => {
+    vi.mocked(fetchWorktrees).mockResolvedValue([]);
+
+    render(App);
+
+    await fireEvent.click(screen.getByTitle("New Worktree (Cmd+K)"));
+    await screen.findByText("New Worktree");
+
+    await fireEvent.click(screen.getByRole("switch", { name: /enable multiple agent selection/i }));
+    await fireEvent.click(screen.getByRole("checkbox", { name: "Codex" }));
+    await fireEvent.input(screen.getByLabelText(/Branch name/i), {
+      target: { value: "feature/new" },
+    });
+
+    expect(screen.queryByText("claude-feature/new")).not.toBeInTheDocument();
+    expect(screen.queryByText("codex-feature/new")).not.toBeInTheDocument();
+    expect(screen.getByText(/One branch\/worktree — 2 agent windows/i)).toBeInTheDocument();
+  });
+
+  it("shows prefixed branch previews when multiple agents are selected (legacy flag off)", async () => {
+    vi.mocked(api.fetchConfig).mockResolvedValue(createConfig({ groupMultiAgentSingleWorkflow: false }));
     vi.mocked(fetchWorktrees).mockResolvedValue([]);
 
     render(App);
@@ -941,7 +1042,42 @@ describe("App create selection", () => {
     expect(screen.getByText("codex-feature/new")).toBeInTheDocument();
   });
 
-  it("submits multi-agent worktree creation when multiple agents are selected", async () => {
+  it("submits one branch with multiple agents when grouped (default)", async () => {
+    vi.mocked(fetchWorktrees).mockResolvedValue([]);
+    vi.mocked(api.createWorktree).mockResolvedValue({
+      primaryBranch: "feature/new",
+      branches: ["feature/new"],
+    });
+
+    render(App);
+
+    await fireEvent.click(screen.getByTitle("New Worktree (Cmd+K)"));
+    await screen.findByText("New Worktree");
+
+    await fireEvent.click(screen.getByRole("switch", { name: /enable multiple agent selection/i }));
+    await fireEvent.click(screen.getByRole("checkbox", { name: "Codex" }));
+    // Grouped mode: switching to existing/direct stays available with 2 agents selected.
+    expect(screen.getByRole("button", { name: "Use existing branch" })).toBeInTheDocument();
+
+    await fireEvent.input(screen.getByLabelText(/Branch name/i), {
+      target: { value: "feature/new" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() => {
+      expect(api.createWorktree).toHaveBeenCalledWith({
+        body: {
+          mode: "new",
+          branch: "feature/new",
+          profile: "default",
+          agents: ["claude", "codex"],
+        },
+      });
+    });
+  });
+
+  it("submits multi-agent worktree creation as separate branches (legacy flag off)", async () => {
+    vi.mocked(api.fetchConfig).mockResolvedValue(createConfig({ groupMultiAgentSingleWorkflow: false }));
     vi.mocked(fetchWorktrees).mockResolvedValue([]);
     vi.mocked(api.createWorktree).mockResolvedValue({
       primaryBranch: "claude-feature/new",

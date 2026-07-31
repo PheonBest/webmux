@@ -13,6 +13,7 @@ import {
   NotificationIdParamsSchema,
   type OneshotConfig,
   OpenWorktreeRequestSchema,
+  RecoverDirectSwitchRequestSchema,
   PostWorktreeToLinearRequestSchema,
   type PostWorktreeToLinearTarget,
   PullMainRequestSchema,
@@ -97,7 +98,7 @@ import {
   type ExportConversationDependencies,
   type ExportConversationInput,
 } from "./services/conversation-export-service";
-import { buildCreateWorktreeTargets, LifecycleError } from "./services/lifecycle-service";
+import { buildCreateWorktreeTargets, isGroupMultiAgentSessionEnabled, LifecycleError } from "./services/lifecycle-service";
 import { buildNativeTerminalLaunch, buildNativeTerminalTmuxCommand } from "./services/native-terminal-service";
 import {
   fetchBranchPrStates,
@@ -162,6 +163,11 @@ interface TerminalWsData {
   kind: "terminal";
   prefix: string;
   branch: string;
+  /** Set when the client requested a specific tab's window (an `agent-window`
+   *  tab under the "group multiple agents" feature) via `?tabId=` on the WS
+   *  URL. Null attaches to the worktree's primary window, same as before this
+   *  field existed. */
+  tabId: string | null;
   worktreeId: string | null;
   attachId: string | null;
   attached: boolean;
@@ -378,6 +384,7 @@ function getFrontendConfig(): {
   autoRemoveOnMerge: boolean;
   projectDir: string;
   mainBranch: string;
+  groupMultiAgentSingleWorkflow: boolean;
 } {
   const defaultProfileName = getDefaultProfileName(config);
   const orderedProfileEntries = Object.entries(config.profiles).sort(([left], [right]) => {
@@ -407,6 +414,7 @@ function getFrontendConfig(): {
     autoRemoveOnMerge: autoRemoveOnMergeEnabled,
     projectDir: PROJECT_DIR,
     mainBranch: config.workspace.mainBranch,
+    groupMultiAgentSingleWorkflow: isGroupMultiAgentSessionEnabled(),
   };
 }
 
@@ -483,7 +491,7 @@ function sendAgentsWs(ws: { readyState: number; send: (data: string) => void }, 
 function catching(label: string, fn: () => Promise<Response>): Promise<Response> {
   return fn().catch((err: unknown) => {
     if (err instanceof LifecycleError) {
-      return errorResponse(err.message, err.status);
+      return errorResponse(err.message, err.status, err.code);
     }
 
     const msg = err instanceof Error ? err.message : String(err);
@@ -540,7 +548,12 @@ async function withMutatingTab<T>(branch: string, fn: () => Promise<T>): Promise
   }
 }
 
-async function resolveTerminalWorktree(branch: string): Promise<{
+/** `tabId`, when given and pointing at a live `agent-window` tab (the "group
+ *  multiple agents into one workflow" feature), redirects the attach target to
+ *  that agent's own tmux window instead of the worktree's primary window —
+ *  same owning tmux session, different window. Omitted/unmatched tabId falls
+ *  back to the primary window, same behavior as before this parameter existed. */
+async function resolveTerminalWorktree(branch: string, tabId?: string | null): Promise<{
   worktreeId: string;
   attachTarget: TerminalAttachTarget;
   agentName: WorktreeSnapshot["agentName"];
@@ -558,11 +571,15 @@ async function resolveTerminalWorktree(branch: string): Promise<{
     throw new Error(`No open tmux window found for worktree: ${branch}`);
   }
 
+  const agentWindowTab = tabId
+    ? state.tabs.find((tab) => tab.tabId === tabId && tab.kind === "agent-window" && tab.windowName)
+    : undefined;
+
   return {
     worktreeId: state.worktreeId,
     attachTarget: {
       ownerSessionName: state.session.sessionName,
-      windowName: state.session.windowName,
+      windowName: agentWindowTab?.windowName ?? state.session.windowName,
     },
     agentName: state.agentName,
   };
@@ -1354,7 +1371,8 @@ async function apiCreateWorktree(req: Request): Promise<Response> {
   }
 
   if (resolvedBranch) {
-    const targetBranches = buildCreateWorktreeTargets(resolvedBranch, selectedAgents).map((target) => target.branch);
+    const targetBranches = buildCreateWorktreeTargets(resolvedBranch, selectedAgents, isGroupMultiAgentSessionEnabled())
+      .map((target) => target.branch);
     for (const targetBranch of targetBranches) {
       ensureBranchNotBusy(targetBranch);
     }
@@ -1384,6 +1402,26 @@ async function apiCreateWorktree(req: Request): Promise<Response> {
     primaryBranch: result.primaryBranch,
     branches: result.branches,
   }, 201);
+}
+
+/** Explicit opt-in recovery for a direct-mode switch blocked by uncommitted
+ *  changes (LifecycleError code DIRECT_SWITCH_DIRTY_ERROR_CODE on the blocked
+ *  switch's 409). Deliberately NOT triggered automatically by the blocked
+ *  switch itself — it creates new git state (a branch + worktree) as a side
+ *  effect, which shouldn't happen silently behind what looks like a simple
+ *  "switch branch" action. The frontend surfaces a "Resolve in a new
+ *  worktree" button on the dirty-switch error that calls this endpoint. */
+async function apiRecoverDirectSwitch(req: Request): Promise<Response> {
+  const parsed = await parseJsonBody(req, RecoverDirectSwitchRequestSchema);
+  if (!parsed.ok) return parsed.response;
+  const { targetBranch, prompt } = parsed.data;
+  log.info(`[worktree:direct:recover] targetBranch=${targetBranch}`);
+  const result = await lifecycleService.recoverDirectSwitchConflict({
+    targetBranch,
+    ...(prompt?.trim() ? { prompt: prompt.trim() } : {}),
+  });
+  log.debug(`[worktree:direct:recover] done branch=${result.branch} worktreeId=${result.worktreeId}`);
+  return jsonResponse(result, 201);
 }
 
 async function apiDeleteWorktree(name: string): Promise<Response> {
@@ -1925,8 +1963,9 @@ function parseAgentIdParam(params: Record<string, string>):
 
     "/ws/:worktree": (req, server) => {
       const branch = decodeURIComponent(req.params.worktree);
+      const tabId = new URL(req.url).searchParams.get("tabId") || null;
       return server.upgrade(req, {
-        data: { kind: "terminal", prefix: instancePrefix, branch, worktreeId: null, attachId: null, attached: false },
+        data: { kind: "terminal", prefix: instancePrefix, branch, tabId, worktreeId: null, attachId: null, attached: false },
       })
         ? undefined
         : new Response("WebSocket upgrade failed", { status: 400 });
@@ -2019,6 +2058,10 @@ function parseAgentIdParam(params: Record<string, string>):
     [apiPaths.fetchWorktrees]: {
       GET: () => catching("GET /api/worktrees", () => apiGetWorktrees()),
       POST: (req) => catching("POST /api/worktrees", () => apiCreateWorktree(req)),
+    },
+
+    [apiPaths.recoverDirectSwitch]: {
+      POST: (req) => catching("POST /api/worktrees/direct/recover", () => apiRecoverDirectSwitch(req)),
     },
 
     [apiPaths.setWorktreeOrder]: {
@@ -2288,7 +2331,7 @@ function parseAgentIdParam(params: Record<string, string>):
               if (msg.initialPane !== undefined) {
                 log.debug(`[ws] initialPane=${msg.initialPane} branch=${branch}`);
               }
-              const terminalWorktree = await resolveTerminalWorktree(branch);
+              const terminalWorktree = await resolveTerminalWorktree(branch, data.tabId);
               const attachId = `${terminalWorktree.worktreeId}:${randomUUID()}`;
               data.worktreeId = terminalWorktree.worktreeId;
               data.attachId = attachId;

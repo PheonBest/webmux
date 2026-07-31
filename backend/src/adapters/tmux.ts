@@ -153,8 +153,15 @@ export function buildProjectSessionName(projectRoot: string): string {
   return `wm-${base}-${hash}`;
 }
 
-export function buildWorktreeWindowName(branch: string): string {
-  return `wm-${branch}`;
+/** The worktree's primary tmux window (unchanged, backward compatible) when
+ *  `agentId` is omitted. When `agentId` is given (an extra agent window under
+ *  the "group multiple agents into one workflow" feature — see
+ *  WEBMUX_GROUP_MULTI_AGENT_SESSION in lifecycle-service.ts), returns a
+ *  distinct, disambiguated window name for that agent's own tmux window
+ *  within the same worktree/branch. */
+export function buildWorktreeWindowName(branch: string, agentId?: string): string {
+  if (!agentId) return `wm-${branch}`;
+  return `wm-${branch}--${sanitizeTmuxNameSegment(agentId)}`;
 }
 
 /** Hidden window that holds a worktree's parked (inactive) tab panes. */

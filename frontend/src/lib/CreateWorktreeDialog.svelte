@@ -34,6 +34,7 @@
     branchListMode = $bindable<"existing" | "direct">("existing"),
     startupEnvs = {},
     linearCreateTicketOption = false,
+    groupMultiAgentEnabled = true,
     openedFromLinearIssue = false,
     oncreate,
     oncancel,
@@ -56,6 +57,12 @@
     branchListMode?: "existing" | "direct";
     startupEnvs?: Record<string, string | boolean>;
     linearCreateTicketOption?: boolean;
+    /** WEBMUX_GROUP_MULTI_AGENT_SESSION (default on): when true, selecting
+     *  multiple agents creates ONE branch/worktree with one tmux window per
+     *  agent — compatible with every mode. When false (legacy), multiple
+     *  agents create N separate prefixed branches, which only makes sense
+     *  for mode "new". */
+    groupMultiAgentEnabled?: boolean;
     openedFromLinearIssue?: boolean;
     oncreate: (request: CreateWorktreeRequest) => void;
     oncancel: () => void;
@@ -156,7 +163,7 @@
   let linearTeamKeyLooksLikeIssue = $derived(linearTeamKeyParsed?.kind === "issue");
   let linearTeamKeyValid = $derived(linearTeamKeyParsed?.kind === "team");
   let branchPreview = $derived(
-    mode === "new" && !createLinearTicket && creatingMultipleAgents && newBranchName.trim().length > 0
+    mode === "new" && !createLinearTicket && creatingMultipleAgents && !groupMultiAgentEnabled && newBranchName.trim().length > 0
       ? selectedAgentIds.map((agentId) => `${agentId}-${newBranchName.trim()}`)
       : [],
   );
@@ -194,7 +201,10 @@
   });
 
   $effect(() => {
-    if (creatingMultipleAgents && (mode === "existing" || mode === "direct")) {
+    // Legacy (ungrouped) multi-agent creation means N separate branches, which
+    // only makes sense for mode "new" — bounce back like before. Grouped mode
+    // creates one branch regardless of agent count, so existing/direct stay valid.
+    if (!groupMultiAgentEnabled && creatingMultipleAgents && (mode === "existing" || mode === "direct")) {
       mode = "new";
       selectedExistingBranch = "";
     }
@@ -229,7 +239,7 @@
   function openExistingBranchSelector(): void {
     mode = "existing";
     branchListMode = "existing";
-    setMultiAgentMode(false);
+    if (!groupMultiAgentEnabled) setMultiAgentMode(false);
     if (!selectedExistingBranch && initialBranch.trim().length > 0) {
       selectedExistingBranch = initialBranch.trim();
     }
@@ -238,7 +248,7 @@
   function openDirectBranchSelector(): void {
     mode = "direct";
     branchListMode = "direct";
-    setMultiAgentMode(false);
+    if (!groupMultiAgentEnabled) setMultiAgentMode(false);
     if (!selectedExistingBranch && initialBranch.trim().length > 0) {
       selectedExistingBranch = initialBranch.trim();
     }
@@ -334,7 +344,7 @@
           <p class="mt-2 text-[11px] text-muted">
             The worktree branch will use the Linear ticket branch name.
           </p>
-        {:else if creatingMultipleAgents}
+        {:else if creatingMultipleAgents && !groupMultiAgentEnabled}
           <div class="mt-2 text-[11px] text-muted">
             <p>A separate prefixed branch will be created for each selected agent.</p>
             {#if branchPreview.length > 0}
@@ -344,6 +354,26 @@
                 {/each}
               </ul>
             {/if}
+          </div>
+        {:else if creatingMultipleAgents}
+          <p class="mt-2 text-[11px] text-muted">
+            One branch/worktree — {selectedAgentIds.length} agent windows, switchable via tabs.
+          </p>
+          <div class="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+            <button
+              type="button"
+              class="text-[11px] text-accent hover:underline"
+              onclick={openExistingBranchSelector}
+            >
+              Use existing branch
+            </button>
+            <button
+              type="button"
+              class="text-[11px] text-accent hover:underline"
+              onclick={openDirectBranchSelector}
+            >
+              Run directly on branch (no worktree)
+            </button>
           </div>
         {:else}
           <div class="mt-2 flex flex-wrap gap-x-3 gap-y-1">
@@ -450,9 +480,9 @@
         <span class="text-xs text-muted">{multiAgentMode ? `Agents (${selectedAgentIds.length} selected)` : "Agent"}</span>
         <label
           class="flex items-center gap-2 text-[11px] text-muted"
-          class:cursor-pointer={mode === "new"}
-          class:opacity-50={mode !== "new"}
-          title={mode !== "new"
+          class:cursor-pointer={groupMultiAgentEnabled || mode === "new"}
+          class:opacity-50={!groupMultiAgentEnabled && mode !== "new"}
+          title={!groupMultiAgentEnabled && mode !== "new"
             ? "Multiple agents each need their own new branch — not available when using an existing branch or running directly on one."
             : undefined}
         >
@@ -460,14 +490,18 @@
           <Toggle
             size="sm"
             checked={multiAgentMode}
-            disabled={mode !== "new"}
+            disabled={!groupMultiAgentEnabled && mode !== "new"}
             ontoggle={setMultiAgentMode}
             aria-label="Enable multiple agent selection"
           />
         </label>
       </div>
       {#if creatingMultipleAgents}
-        <p class="mb-2 text-[11px] text-muted">Creates one worktree per agent.</p>
+        <p class="mb-2 text-[11px] text-muted">
+          {groupMultiAgentEnabled
+            ? "One workflow, one branch — each agent gets its own tab/window."
+            : "Creates one worktree per agent."}
+        </p>
       {/if}
       {#if availableAgentOptions.length === 0}
         <p class="rounded-lg border border-edge bg-surface px-3 py-2 text-[12px] text-muted">

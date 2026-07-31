@@ -15,6 +15,7 @@
     agentTerminalStale = false,
     refreshingAgentTerminal = false,
     onrefreshagentterminal,
+    tabId,
   }: {
     worktree: string;
     isMobile?: boolean;
@@ -23,6 +24,11 @@
     agentTerminalStale?: boolean;
     refreshingAgentTerminal?: boolean;
     onrefreshagentterminal?: () => void;
+    /** When set to an "agent-window" tab's id (the "group multiple agents"
+     *  feature — a different agent's own tmux window, not a swapped pane),
+     *  the terminal WebSocket connects to that window instead of the
+     *  worktree's primary window. Omit for the normal root/fork tab case. */
+    tabId?: string;
   } = $props();
 
   const DISCONNECTED_NOTICE = "\r\n\x1b[90m[Disconnected]\x1b[0m";
@@ -272,7 +278,8 @@
   function connect(announceReconnect = false): void {
     if (destroyed || ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) return;
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-    const nextWs = new WebSocket(`${protocol}//${location.host}${apiBase}/ws/${encodeURIComponent(worktree)}`);
+    const tabIdQuery = tabId ? `?tabId=${encodeURIComponent(tabId)}` : "";
+    const nextWs = new WebSocket(`${protocol}//${location.host}${apiBase}/ws/${encodeURIComponent(worktree)}${tabIdQuery}`);
     ws = nextWs;
 
     nextWs.onmessage = (event) => {
