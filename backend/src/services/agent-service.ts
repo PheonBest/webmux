@@ -25,8 +25,16 @@ function buildDockerRuntimeBootstrap(runtimeEnvPath: string): string {
   return `${buildRuntimeBootstrap(runtimeEnvPath)}; export PATH="$PATH:${DOCKER_PATH_FALLBACK}"`;
 }
 
+/** opencode has no `--dangerously-skip-permissions`-style CLI flag (tracked upstream,
+ *  still unresolved as of this integration) — its permission model is config/env
+ *  driven instead. `OPENCODE_PERMISSION` is the documented escape hatch: a JSON
+ *  map of tool-name pattern -> "allow"/"ask"/"deny" (wildcards supported, e.g. `"*"`),
+ *  matching the same shape as `permission` in `opencode.json`. "yolo" here means a
+ *  blanket `"*": "allow"` instead of passing a flag. */
+const OPENCODE_YOLO_PERMISSION_JSON = JSON.stringify({ "*": "allow" });
+
 function buildBuiltInAgentInvocation(input: {
-  agent: "claude" | "codex";
+  agent: "claude" | "codex" | "opencode";
   yolo?: boolean;
   systemPrompt?: string;
   prompt?: string;
@@ -38,6 +46,31 @@ function buildBuiltInAgentInvocation(input: {
   pinSessionId?: string;
 }): string {
   const promptSuffix = input.prompt ? ` -- ${quoteShell(input.prompt)}` : "";
+
+  if (input.agent === "opencode") {
+    const yoloPrefix = input.yolo ? `OPENCODE_PERMISSION=${quoteShell(OPENCODE_YOLO_PERMISSION_JSON)} ` : "";
+    // opencode's system prompt equivalent is an agent/instructions config, not a CLI
+    // flag — fold it into the leading prompt text instead (same fallback used for
+    // the oneshot LLM invocation in llm-spawn.ts).
+    const leadingPrompt = input.systemPrompt && input.launchMode !== "resume" && input.launchMode !== "fork"
+      ? input.systemPrompt
+      : undefined;
+    if (input.launchMode === "fork" && input.forkFromSessionId) {
+      // opencode's CLI has no documented session-fork flag (only a `/session/:id/fork`
+      // HTTP endpoint) — best-effort fallback: resume the parent session directly.
+      return `${yoloPrefix}opencode --session ${quoteShell(input.forkFromSessionId)}${promptSuffix}`;
+    }
+    if (input.launchMode === "resume") {
+      const resumeTarget = input.resumeConversationId
+        ? ` --session ${quoteShell(input.resumeConversationId)}`
+        : " --continue";
+      return `${yoloPrefix}opencode${resumeTarget}${promptSuffix}`;
+    }
+    const combinedPromptSuffix = leadingPrompt
+      ? ` -- ${quoteShell(input.prompt ? `${leadingPrompt}\n\n${input.prompt}` : leadingPrompt)}`
+      : promptSuffix;
+    return `${yoloPrefix}opencode${combinedPromptSuffix}`;
+  }
 
   if (input.agent === "codex") {
     const hooksFlag = " --enable hooks";

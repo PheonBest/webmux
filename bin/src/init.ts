@@ -31,6 +31,7 @@ const deps: Dep[] = [
   { tool: "gh", required: false, hint: "brew install gh  then  gh auth login" },
   { tool: "claude", required: false, hint: "Install the Claude Code CLI to let Claude scaffold .webmux.yaml" },
   { tool: "codex", required: false, hint: "Install the Codex CLI to let Codex scaffold .webmux.yaml" },
+  { tool: "opencode", required: false, hint: "Install the opencode CLI to let opencode scaffold .webmux.yaml" },
   { tool: "docker", required: false, hint: "https://docs.docker.com/get-started/get-docker/" },
 ];
 
@@ -51,11 +52,16 @@ function checkDeps(): Dep[] {
 }
 
 function agentLabel(agent: InitAgent): string {
-  return agent === "claude" ? "Claude" : "Codex";
+  if (agent === "claude") return "Claude";
+  if (agent === "opencode") return "opencode";
+  return "Codex";
 }
 
 function defaultTemplateAgent(): InitAgent {
-  return which("codex") && !which("claude") ? "codex" : "claude";
+  if (which("claude")) return "claude";
+  if (which("codex")) return "codex";
+  if (which("opencode")) return "opencode";
+  return "claude";
 }
 
 function createAgentStreamPrinter(label: string): {
@@ -182,10 +188,11 @@ if (existsSync(webmuxYaml)) {
 } else {
   const claudeAvailable = which("claude");
   const codexAvailable = which("codex");
+  const opencodeAvailable = which("opencode");
 
   const choice = await p.select<InitAuthoringChoice>({
     message: "No .webmux.yaml found. How should webmux create it?",
-    initialValue: claudeAvailable ? "claude" : codexAvailable ? "codex" : "manual",
+    initialValue: claudeAvailable ? "claude" : codexAvailable ? "codex" : opencodeAvailable ? "opencode" : "manual",
     options: [
       {
         value: "claude",
@@ -200,6 +207,12 @@ if (existsSync(webmuxYaml)) {
         disabled: !codexAvailable,
       },
       {
+        value: "opencode",
+        label: "opencode",
+        hint: opencodeAvailable ? "opencode inspects the repo and adapts the starter .webmux.yaml" : "opencode CLI not found",
+        disabled: !opencodeAvailable,
+      },
+      {
         value: "manual",
         label: "I'll do it myself",
         hint: "Create the starter template now so you can edit it manually",
@@ -212,7 +225,7 @@ if (existsSync(webmuxYaml)) {
     process.exit(1);
   }
 
-  const selectedAgent: InitAgent = choice === "codex" ? "codex" : defaultTemplateAgent();
+  const selectedAgent: InitAgent = choice === "manual" ? defaultTemplateAgent() : choice;
   const context = detectInitProjectContext(gitRoot, selectedAgent);
 
   if (choice === "manual") {

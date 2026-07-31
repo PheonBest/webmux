@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { detectProjectName, run } from "../lib/shell";
 
-export type InitAuthoringChoice = "claude" | "codex" | "manual";
+export type InitAuthoringChoice = "claude" | "codex" | "opencode" | "manual";
 export type InitAgent = Exclude<InitAuthoringChoice, "manual">;
 export type InitPackageManager = "bun" | "npm" | "pnpm" | "yarn";
 
@@ -150,6 +150,23 @@ export function buildInitAgentCommand(
   prompt: InitPromptSpec,
   outputPrefix = "webmux-init",
 ): InitAgentCommandSpec {
+  if (agent === "opencode") {
+    // opencode has no documented structured/streaming output mode analogous to
+    // Claude's `stream-json` or Codex's `--json` (tracked as a gap — see the
+    // opencode-server-client.ts module doc for the one documented real-time
+    // surface, its HTTP/SSE server). `opencode run` prints plain text to stdout,
+    // so parseInitAgentStreamLine treats each line as literal text for this agent
+    // rather than parsing it as a JSON event.
+    return {
+      agent,
+      cmd: "opencode",
+      args: [
+        "run",
+        `${prompt.systemPrompt}\n\n${prompt.userPrompt}`,
+      ],
+    };
+  }
+
   if (agent === "claude") {
     return {
       agent,
@@ -417,6 +434,10 @@ export function parseInitAgentStreamLine(
 ): InitAgentStreamEvent[] {
   const trimmed = line.trim();
   if (!trimmed) return [];
+
+  if (agent === "opencode") {
+    return [{ kind: "assistant_delta", text: `${line}\n` }];
+  }
 
   let parsed: unknown;
   try {
@@ -729,7 +750,7 @@ startupEnvs:
 #   # Provider used for automatic branch naming.
 #   provider: ${defaultAgent}
 #   # Model used for automatic branch naming.
-#   model: ${defaultAgent === "codex" ? "gpt-5.1-codex" : "claude-3-5-haiku-latest"}
+#   model: ${defaultAgent === "codex" ? "gpt-5.1-codex" : defaultAgent === "opencode" ? "" : "claude-3-5-haiku-latest"}
 #   # Prompt that tells the model how to name branches.
 #   system_prompt: >
 #     Generate a short kebab-case git branch name.

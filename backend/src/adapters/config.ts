@@ -116,7 +116,9 @@ function isStringArray(value: unknown): value is string[] {
 }
 
 function parseAgentKind(value: unknown): AgentKind {
-  return value === "codex" ? "codex" : "claude";
+  if (value === "codex") return "codex";
+  if (value === "opencode") return "opencode";
+  return "claude";
 }
 
 function parsePanes(raw: unknown): PaneTemplate[] {
@@ -301,7 +303,7 @@ function parseOneshot(raw: unknown): OneshotConfig {
 function parseAutoName(raw: unknown): AutoNameConfig | null {
   if (!isRecord(raw)) return null;
   const provider = raw.provider;
-  if (provider !== "claude" && provider !== "codex") return null;
+  if (provider !== "claude" && provider !== "codex" && provider !== "opencode") return null;
 
   return {
     provider,

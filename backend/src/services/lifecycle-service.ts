@@ -353,7 +353,7 @@ export class LifecycleService {
       const initialized = await this.refreshManagedArtifacts(resolved);
       const { profileName, profile } = this.resolveProfile(initialized.meta.profile);
       const agent = this.resolveAgentDefinition(initialized.meta.agent);
-      if (agent.kind !== "builtin" || (agent.implementation.agent !== "codex" && agent.implementation.agent !== "claude")) {
+      if (agent.kind !== "builtin") {
         throw new LifecycleError("Refreshing the agent terminal is only available for built-in agent worktrees", 409);
       }
 
@@ -367,6 +367,11 @@ export class LifecycleService {
           throw new LifecycleError(`No ${agent.label} conversation is available to refresh`, 409);
         }
         resumeConversationId = conversation.threadId;
+      } else if (agent.implementation.agent === "opencode") {
+        if (conversation.provider !== "opencodeServer") {
+          throw new LifecycleError(`No ${agent.label} conversation is available to refresh`, 409);
+        }
+        resumeConversationId = conversation.sessionId;
       } else {
         if (conversation.provider !== "claudeCode") {
           throw new LifecycleError(`No ${agent.label} conversation is available to refresh`, 409);
@@ -529,7 +534,7 @@ export class LifecycleService {
     meta: WorktreeMeta;
     worktreePath: string;
     agent: AgentDefinition;
-    agentKind: "claude" | "codex";
+    agentKind: "claude" | "codex" | "opencode";
     profile: ProfileConfig;
     profileName: string;
     sessionName: string;
@@ -551,7 +556,7 @@ export class LifecycleService {
     }
     const agent = this.resolveAgentDefinition(resolved.meta.agent);
     if (agent.kind !== "builtin") {
-      throw new LifecycleError("Tabs are only available for the built-in Claude and Codex agents", 409);
+      throw new LifecycleError("Tabs are only available for the built-in Claude, Codex, and opencode agents", 409);
     }
 
     const initialized = await this.refreshManagedArtifacts(resolved);
@@ -574,7 +579,7 @@ export class LifecycleService {
    *  Safe because at first fork the root is the only (or newest) session for the cwd. */
   private async ensureRootSessionId(ctx: {
     meta: WorktreeMeta;
-    agentKind: "claude" | "codex";
+    agentKind: "claude" | "codex" | "opencode";
     worktreePath: string;
     resolved: ResolvedLifecycleWorktree;
   }): Promise<string | null> {

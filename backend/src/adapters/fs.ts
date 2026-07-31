@@ -6,6 +6,7 @@ import type {
   CiCheck,
   CodexWorktreeConversationMeta,
   ControlEnvMap,
+  OpencodeWorktreeConversationMeta,
   OpenSessionsState,
   PrComment,
   PrEntry,
@@ -243,6 +244,20 @@ function normalizeConversationMeta(raw: WorktreeConversationMeta | null | undefi
       provider: "codexAppServer",
       conversationId,
       threadId,
+      cwd: raw.cwd,
+      lastSeenAt: raw.lastSeenAt,
+    };
+    return normalized;
+  }
+
+  if (raw.provider === "opencodeServer") {
+    const conversationId = raw.conversationId || raw.sessionId;
+    const sessionId = raw.sessionId || raw.conversationId;
+    if (!conversationId || !sessionId) return undefined;
+    const normalized: OpencodeWorktreeConversationMeta = {
+      provider: "opencodeServer",
+      conversationId,
+      sessionId,
       cwd: raw.cwd,
       lastSeenAt: raw.lastSeenAt,
     };

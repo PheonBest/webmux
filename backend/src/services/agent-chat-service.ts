@@ -1,7 +1,7 @@
 import type { AgentDefinition } from "./agent-registry";
 
 export interface AgentChatSupport {
-  provider: "claude" | "codex";
+  provider: "claude" | "codex" | "opencode";
   submitDelayMs: number;
 }
 

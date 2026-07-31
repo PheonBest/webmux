@@ -82,7 +82,7 @@ webmux init                     # creates .webmux.yaml (the only per-project ste
 webmux serve                         # dashboard on http://localhost:5111
 ```
 
-The primary dashboard remains the best desktop experience. On mobile, the same dashboard swaps the embedded terminal for a chat view on open Codex and Claude worktrees.
+The primary dashboard remains the best desktop experience. On mobile, the same dashboard swaps the embedded terminal for a chat view on open Codex and Claude worktrees. (opencode worktrees are supported everywhere else — worktree lifecycle, terminal, resume, lifecycle hooks — but the in-app/mobile chat view is Claude/Codex-only for now; see the opencode section below.)
 
 ### One dashboard, many projects
 
@@ -173,7 +173,7 @@ profiles:
       You are running inside a sandboxed container.
       Backend port: ${PORT}. Frontend port: ${FRONTEND_PORT}.
 
-Custom sandbox images should make `claude` or `codex` available on the container's normal `PATH` (for example with `ENV PATH=/your/tool/bin:$PATH`). webmux does not rely on login-shell dotfiles like `.bashrc` to discover agent binaries inside the container.
+Custom sandbox images should make `claude`, `codex`, or `opencode` available on the container's normal `PATH` (for example with `ENV PATH=/your/tool/bin:$PATH`). webmux does not rely on login-shell dotfiles like `.bashrc` to discover agent binaries inside the container.
 
 integrations:
   github:
@@ -214,7 +214,7 @@ lifecycleHooks:
 | `services[].portStart` | number | no | Base port for auto-allocation |
 | `services[].portStep` | number | no | Port increment per worktree slot (default: `1`) |
 | `profiles.<name>.runtime` | string | yes | `host` or `docker` |
-| `profiles.<name>.yolo` | boolean | no | Enables `--dangerously-skip-permissions` for Claude or `--yolo` for Codex |
+| `profiles.<name>.yolo` | boolean | no | Enables `--dangerously-skip-permissions` for Claude, `--yolo` for Codex, or a blanket-allow `OPENCODE_PERMISSION` env var for opencode |
 | `profiles.<name>.panes[]` | array | yes | Pane layout for that profile |
 | `profiles.<name>.panes[].kind` | string | yes | `agent`, `shell`, or `command` |
 | `profiles.<name>.panes[].command` | string | yes (for `command`) | Startup command run inside the pane |
