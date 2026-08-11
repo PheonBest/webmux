@@ -17,7 +17,7 @@ webmux — Dev dashboard for managing Git worktrees
 
 Usage:
   webmux serve        Start the dashboard server (--app opens in app mode)
-  webmux init         Interactive project setup
+  webmux init         Interactive project setup (--agent claude|codex|opencode to skip the picker)
   webmux service      Manage webmux as a system service
   webmux update       Update webmux to the latest version
   webmux add          Create a worktree using the dashboard lifecycle

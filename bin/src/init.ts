@@ -64,6 +64,19 @@ function defaultTemplateAgent(): InitAgent {
   return "claude";
 }
 
+/** `webmux init --agent <claude|codex|opencode>` — skips the interactive
+ *  "how should webmux create it?" picker so `init` can run unattended (CI,
+ *  provisioning scripts). Only recognized when the config doesn't exist yet;
+ *  ignored otherwise since there's nothing to pick an agent for. */
+function parseAgentFlag(argv: string[]): InitAgent | null {
+  const index = argv.indexOf("--agent");
+  if (index === -1) return null;
+  const value = argv[index + 1];
+  if (value === "claude" || value === "codex" || value === "opencode") return value;
+  p.log.error(`--agent must be one of: claude, codex, opencode (got: ${value ?? "<missing>"})`);
+  process.exit(1);
+}
+
 function createAgentStreamPrinter(label: string): {
   onEvent: (event: InitAgentStreamEvent) => void;
   finish: () => void;
@@ -190,39 +203,54 @@ if (existsSync(webmuxYaml)) {
   const codexAvailable = which("codex");
   const opencodeAvailable = which("opencode");
 
-  const choice = await p.select<InitAuthoringChoice>({
-    message: "No .webmux.yaml found. How should webmux create it?",
-    initialValue: claudeAvailable ? "claude" : codexAvailable ? "codex" : opencodeAvailable ? "opencode" : "manual",
-    options: [
-      {
-        value: "claude",
-        label: "Claude",
-        hint: claudeAvailable ? "Claude inspects the repo and adapts the starter .webmux.yaml" : "Claude CLI not found",
-        disabled: !claudeAvailable,
-      },
-      {
-        value: "codex",
-        label: "Codex",
-        hint: codexAvailable ? "Codex inspects the repo and adapts the starter .webmux.yaml" : "Codex CLI not found",
-        disabled: !codexAvailable,
-      },
-      {
-        value: "opencode",
-        label: "opencode",
-        hint: opencodeAvailable ? "opencode inspects the repo and adapts the starter .webmux.yaml" : "opencode CLI not found",
-        disabled: !opencodeAvailable,
-      },
-      {
-        value: "manual",
-        label: "I'll do it myself",
-        hint: "Create the starter template now so you can edit it manually",
-      },
-    ],
-  });
+  const agentFlag = parseAgentFlag(process.argv.slice(2));
+  let choice: InitAuthoringChoice;
 
-  if (p.isCancel(choice)) {
-    p.outro("Aborted.");
-    process.exit(1);
+  if (agentFlag) {
+    const available = agentFlag === "claude" ? claudeAvailable : agentFlag === "codex" ? codexAvailable : opencodeAvailable;
+    if (!available) {
+      p.log.error(`--agent ${agentFlag} requested, but the ${agentFlag} CLI was not found.`);
+      p.outro("Setup incomplete.");
+      process.exit(1);
+    }
+    p.log.success(`Using --agent ${agentFlag} (skipping the interactive picker)`);
+    choice = agentFlag;
+  } else {
+    const selected = await p.select<InitAuthoringChoice>({
+      message: "No .webmux.yaml found. How should webmux create it?",
+      initialValue: claudeAvailable ? "claude" : codexAvailable ? "codex" : opencodeAvailable ? "opencode" : "manual",
+      options: [
+        {
+          value: "claude",
+          label: "Claude",
+          hint: claudeAvailable ? "Claude inspects the repo and adapts the starter .webmux.yaml" : "Claude CLI not found",
+          disabled: !claudeAvailable,
+        },
+        {
+          value: "codex",
+          label: "Codex",
+          hint: codexAvailable ? "Codex inspects the repo and adapts the starter .webmux.yaml" : "Codex CLI not found",
+          disabled: !codexAvailable,
+        },
+        {
+          value: "opencode",
+          label: "opencode",
+          hint: opencodeAvailable ? "opencode inspects the repo and adapts the starter .webmux.yaml" : "opencode CLI not found",
+          disabled: !opencodeAvailable,
+        },
+        {
+          value: "manual",
+          label: "I'll do it myself",
+          hint: "Create the starter template now so you can edit it manually",
+        },
+      ],
+    });
+
+    if (p.isCancel(selected)) {
+      p.outro("Aborted.");
+      process.exit(1);
+    }
+    choice = selected;
   }
 
   const selectedAgent: InitAgent = choice === "manual" ? defaultTemplateAgent() : choice;
