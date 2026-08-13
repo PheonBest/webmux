@@ -251,6 +251,7 @@ let stopAutoRemoveMonitor: (() => void) | null = null;
 let stopOneshotWatcher: (() => void) | null = null;
 let stopAutoPullMonitor: (() => void) | null = null;
 let stopSessionSnapshot: (() => void) | null = null;
+let stopBranchWarmup: (() => void) | null = null;
 
 /** Create a worktree in oneshot mode for the given Linear issue and arm the
  *  server-side watcher to post results back + close the session when done. Returns
@@ -2420,6 +2421,11 @@ function parseAgentIdParam(params: Record<string, string>):
       );
     }
     stopSessionSnapshot = startSessionSnapshotMonitor({ git, tmux, projectRoot: PROJECT_DIR });
+    // Keeps the branch-picker dropdowns (new worktree / direct mode) instant —
+    // without this they block on a live `git for-each-ref` per request, which
+    // can take seconds on a slow filesystem (e.g. a WSL project mounted from
+    // the Windows drive).
+    stopBranchWarmup = lifecycleService.startBranchWarmup();
   }
 
   function stopLight(): void {
@@ -2434,6 +2440,8 @@ function parseAgentIdParam(params: Record<string, string>):
     stopAutoPullMonitor = null;
     stopSessionSnapshot?.();
     stopSessionSnapshot = null;
+    stopBranchWarmup?.();
+    stopBranchWarmup = null;
   }
 
   return { prefix: instancePrefix, routes, wsHandlers, startLight, stopLight };

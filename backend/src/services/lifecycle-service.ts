@@ -58,6 +58,7 @@ import {
 } from "./worktree-service";
 import { log } from "../lib/log";
 import { generateFallbackBranchName, generateRecoveryBranchName } from "../lib/branch-name";
+import { startSerializedInterval } from "../lib/async";
 
 const DOCKER_CONTROL_HOST = "host.docker.internal";
 const MAX_WORKTREE_LABEL_LENGTH = 80;
@@ -86,6 +87,26 @@ function stringifyStartupEnvValue(value: string | boolean): string {
 
 function trimTrailingSlashes(value: string): string {
   return value.replace(/\/+$/, "");
+}
+
+/** Branches with a live (non-bare) worktree, derived from a raw `git worktree
+ *  list` snapshot. Pulled out as a pure function so both the live lookup
+ *  (`listCheckedOutBranches`) and the cached branch listing can share it
+ *  without duplicating the filter. */
+function checkedOutBranchesFrom(
+  worktrees: GitWorktreeEntry[],
+  projectRoot: string,
+  options: { excludeProjectRoot?: boolean } = {},
+): Set<string> {
+  return new Set(
+    worktrees
+      .filter((entry): entry is GitWorktreeEntry & { branch: string } =>
+        !entry.bare
+        && entry.branch !== null
+        && !(options.excludeProjectRoot && resolve(entry.path) === projectRoot)
+      )
+      .map((entry) => entry.branch),
+  );
 }
 
 function normalizeWorktreeLabel(label: string | null): string | null {
@@ -367,6 +388,11 @@ export class LifecycleService {
         cwd: resolved.entry.path,
         command: buildManagedShellCommand(initialized.paths.runtimeEnvPath),
       });
+      // Force pane-base-index 0 for this window, same as ensureSessionLayout does for
+      // the primary window — otherwise a non-zero tmux.conf default (e.g. `base-index 1`)
+      // leaves the sole pane at index 1 and every `.0`-targeted command below fails with
+      // "can't find pane: 0".
+      this.deps.tmux.setWindowOption(sessionName, windowName, "pane-base-index", "0");
       this.deps.tmux.runCommand(`${sessionName}:${windowName}.0`, agentCommand);
 
       const tab = buildAgentWindowTab({
@@ -1082,12 +1108,52 @@ export class LifecycleService {
     }
   }
 
+  /** Snapshot of the raw git calls behind branch listing, kept warm by
+   *  {@link startBranchWarmup} so `listAvailableBranches`/`listBaseBranches`
+   *  don't block a request on a live git subprocess (slow on some
+   *  filesystems, e.g. a WSL project mounted from the Windows drive). Branch
+   *  *validation* during worktree creation (`resolveBranchAvailability`)
+   *  deliberately keeps calling git live instead of reading this cache — it
+   *  must never act on a stale worktree/branch snapshot. */
+  private branchCache: { local: string[]; remote: string[]; worktrees: GitWorktreeEntry[] } | null = null;
+
+  private refreshBranchCache(): void {
+    const projectRoot = resolve(this.deps.projectRoot);
+    this.branchCache = {
+      local: this.deps.git.listLocalBranches(projectRoot),
+      remote: this.deps.git.listRemoteBranches(projectRoot),
+      worktrees: this.deps.git.listWorktrees(projectRoot),
+    };
+  }
+
+  private ensureBranchCache(): { local: string[]; remote: string[]; worktrees: GitWorktreeEntry[] } {
+    if (!this.branchCache) this.refreshBranchCache();
+    return this.branchCache!;
+  }
+
+  /** Start periodic background refresh of the branch-list cache.
+   *  Returns a cleanup function that stops the monitor. */
+  startBranchWarmup(intervalMs = 10_000): () => void {
+    return startSerializedInterval(async () => {
+      try {
+        this.refreshBranchCache();
+      } catch (error) {
+        log.warn(`[lifecycle] branch cache refresh failed: ${toErrorMessage(error)}`);
+      }
+    }, intervalMs);
+  }
+
   listAvailableBranches(options: ListAvailableBranchesOptions = {}): Array<{ name: string }> {
-    const localBranches = this.listLocalBranches().filter((branch) => isValidBranchName(branch));
+    const cache = this.ensureBranchCache();
+    const localBranches = cache.local.filter((branch) => isValidBranchName(branch));
     const remoteBranches = options.includeRemote
-      ? this.listRemoteBranches().filter((branch) => isValidBranchName(branch))
+      ? cache.remote.filter((branch) => isValidBranchName(branch))
       : [];
-    const checkedOutBranches = this.listCheckedOutBranches({ excludeProjectRoot: options.excludeProjectRoot });
+    const checkedOutBranches = checkedOutBranchesFrom(
+      cache.worktrees,
+      resolve(this.deps.projectRoot),
+      { excludeProjectRoot: options.excludeProjectRoot },
+    );
 
     const allBranches = [...new Set([...localBranches, ...remoteBranches])];
 
@@ -1098,7 +1164,7 @@ export class LifecycleService {
   }
 
   listBaseBranches(): Array<{ name: string }> {
-    return this.listLocalBranches()
+    return this.ensureBranchCache().local
       .filter((branch) => isValidBranchName(branch))
       .sort((left, right) => left.localeCompare(right))
       .map((name) => ({ name }));
@@ -1293,15 +1359,7 @@ export class LifecycleService {
     // in git's view, so it must continue to block branch reuse. Switching this
     // to listLiveWorktrees would falsely report the branch as free.
     const projectRoot = resolve(this.deps.projectRoot);
-    return new Set(
-      this.deps.git.listWorktrees(projectRoot)
-        .filter((entry): entry is GitWorktreeEntry & { branch: string } =>
-          !entry.bare
-          && entry.branch !== null
-          && !(options.excludeProjectRoot && resolve(entry.path) === projectRoot)
-        )
-        .map((entry) => entry.branch),
-    );
+    return checkedOutBranchesFrom(this.deps.git.listWorktrees(projectRoot), projectRoot, options);
   }
 
   /** True when the main repo root currently hosts a "direct" session (mode
