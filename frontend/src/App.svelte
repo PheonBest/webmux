@@ -67,6 +67,7 @@
     createWorktreeTab,
     deleteWorktreeTab,
     fetchWorktrees,
+    onNetworkError,
     postWorktreeToLinear,
     recoverDirectSwitch,
     refreshWorktreeAgentTerminal,
@@ -108,6 +109,7 @@
   let worktrees = $state<WorktreeInfo[]>([]);
   let selectedBranch = $state<string | null>(loadSavedSelectedWorktree());
   let hasLoadedWorktrees = $state(false);
+  let serverUnreachable = $state(false);
   let removeBranch = $state<string | null>(null);
   let mergeBranch = $state<string | null>(null);
   let postToLinearBranch = $state<string | null>(null);
@@ -641,6 +643,7 @@
     try {
       worktrees = await fetchWorktrees();
       hasLoadedWorktrees = true;
+      serverUnreachable = false;
     } catch (err) {
       console.error("Failed to refresh:", err);
     }
@@ -1195,6 +1198,9 @@
   onMount(() => {
     applyTheme(currentTheme);
     void ensureConfigLoaded();
+    const unsubNetworkError = onNetworkError(() => {
+      serverUnreachable = true;
+    });
     refresh();
     refreshLinear();
     let intervalMs = pollIntervalMs;
@@ -1269,6 +1275,7 @@
       document.removeEventListener("visibilitychange", onVisibilityChange);
       mq.removeEventListener("change", onMqChange);
       unsubNotifications();
+      unsubNetworkError();
     };
   });
 </script>
@@ -1754,3 +1761,12 @@
   ondismiss={handleDismissToast}
   onselect={handleSelectToast}
 />
+
+{#if serverUnreachable}
+  <div class="fixed top-4 left-1/2 z-50 -translate-x-1/2" role="alert">
+    <div class="flex items-center gap-2 rounded-lg border border-danger/40 bg-surface/95 px-4 py-2 text-sm text-primary shadow-lg backdrop-blur-sm">
+      <span class="text-danger">&#9888;</span>
+      <span>Cannot connect to server</span>
+    </div>
+  </div>
+{/if}

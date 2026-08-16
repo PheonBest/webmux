@@ -33,12 +33,27 @@ export const activePrefix: string = window.location.pathname.split("/")[1] ?? ""
 /** Base path for the active project's API + WebSocket calls. */
 export const apiBase: string = activePrefix ? `/${activePrefix}` : "";
 
+let networkErrorListeners: Array<() => void> = [];
+
+/** Subscribe to network-level request failures (server unreachable), e.g. to
+ *  show a "Cannot connect to server" notice. Returns an unsubscribe function. */
+export function onNetworkError(listener: () => void): () => void {
+  networkErrorListeners.push(listener);
+  return () => {
+    networkErrorListeners = networkErrorListeners.filter((l) => l !== listener);
+  };
+}
+
+function notifyNetworkError(): void {
+  for (const listener of networkErrorListeners) listener();
+}
+
 /** Per-project client — every worktree/agent/config call is scoped to the
  *  active project. */
-export const api = createApi(apiBase);
+export const api = createApi(apiBase, { onNetworkError: notifyNetworkError });
 
 /** Hub client — project list/add/remove + the migration sensor are global (no prefix). */
-const hubApi = createApi("");
+const hubApi = createApi("", { onNetworkError: notifyNetworkError });
 
 function mapAgentStatus(status: string): string {
   switch (status) {
@@ -364,6 +379,9 @@ export async function uploadFiles(worktree: string, files: File[]): Promise<File
   const res = await fetch(`${apiBase}/api/worktrees/${encodeURIComponent(worktree)}/upload`, {
     method: "POST",
     body: form,
+  }).catch((err: unknown) => {
+    if (err instanceof TypeError) notifyNetworkError();
+    throw err;
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);

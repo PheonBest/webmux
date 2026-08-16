@@ -1,14 +1,36 @@
-import { initClient, type InitClientArgs } from "@ts-rest/core";
+import { initClient, tsRestFetchApi, type ApiFetcher, type InitClientArgs } from "@ts-rest/core";
 import { apiContract } from "./contract";
 
-export type ApiClientOptions = Omit<InitClientArgs, "baseUrl">;
+export type ApiClientOptions = Omit<InitClientArgs, "baseUrl"> & {
+  /** Called when a request fails at the network level — the server couldn't
+   *  be reached at all — as opposed to a completed HTTP response with an
+   *  error status (which throws `ApiError` instead). */
+  onNetworkError?: () => void;
+};
+
+function isNetworkError(err: unknown): boolean {
+  return err instanceof TypeError;
+}
+
+function withNetworkErrorDetection(onNetworkError: () => void): ApiFetcher {
+  return async (args) => {
+    try {
+      return await tsRestFetchApi(args);
+    } catch (err) {
+      if (isNetworkError(err)) onNetworkError();
+      throw err;
+    }
+  };
+}
 
 export function createApiClient(baseUrl: string, options: ApiClientOptions = {}) {
+  const { onNetworkError, ...rest } = options;
   return initClient(apiContract, {
     baseUrl,
     throwOnUnknownStatus: true,
     baseHeaders: {},
-    ...options,
+    ...rest,
+    ...(onNetworkError ? { api: withNetworkErrorDetection(onNetworkError) } : {}),
   });
 }
 

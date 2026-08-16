@@ -35,6 +35,7 @@ const { MockFitAddon, MockTerminal, MockWebSocket } = vi.hoisted(() => {
     write = vi.fn();
     clearSelection = vi.fn();
     dispose = vi.fn();
+    scrollToBottom = vi.fn();
 
     constructor(_options: unknown) {
       MockTerminal.instances.push(this);
@@ -138,6 +139,7 @@ vi.mock("./lib/api", () => ({
   fetchWorktreeConversationHistory: vi.fn(),
   fetchWorktrees: vi.fn(),
   interruptWorktreeConversation: vi.fn(),
+  onNetworkError: vi.fn(() => () => {}),
   recoverDirectSwitch: vi.fn(),
   refreshWorktreeAgentTerminal: vi.fn(),
   selectWorktreeTab: vi.fn(),
@@ -163,6 +165,7 @@ import {
   attachWorktreeConversation,
   connectWorktreeConversationStream,
   fetchWorktrees,
+  onNetworkError,
   postWorktreeToLinear,
   recoverDirectSwitch,
   refreshWorktreeAgentTerminal,
@@ -544,6 +547,34 @@ describe("App create selection", () => {
     await screen.findByText("New Worktree");
     expect(screen.queryByText("No agents available.")).not.toBeInTheDocument();
     expect(screen.getByText("Claude")).toBeInTheDocument();
+  });
+
+  it("shows a connection-lost notice on network error and clears it once a refresh succeeds", async () => {
+    const initialRefresh = deferred<WorktreeInfo[]>();
+    vi.mocked(fetchWorktrees).mockReturnValueOnce(initialRefresh.promise);
+
+    render(App);
+
+    // Wait for the initial mount-time refresh() to fully settle first, so it
+    // can't race with (and clear) the flag we're about to set below.
+    await waitFor(() => expect(fetchWorktrees).toHaveBeenCalledTimes(1));
+    initialRefresh.resolve([]);
+    await initialRefresh.promise;
+    // Let the component's own continuation off this same promise (which
+    // clears serverUnreachable) run before we simulate the network error.
+    await new Promise((r) => setTimeout(r, 50));
+
+    const handleNetworkError = vi.mocked(onNetworkError).mock.calls[0]?.[0];
+    if (!handleNetworkError) throw new Error("onNetworkError was not registered");
+
+    handleNetworkError();
+    await screen.findByText("Cannot connect to server");
+
+    await openCreateDialogAndSubmit("feature/reconnected");
+
+    await waitFor(() => {
+      expect(screen.queryByText("Cannot connect to server")).not.toBeInTheDocument();
+    });
   });
 
   it("selects the new worktree when nothing was selected before creation", async () => {
