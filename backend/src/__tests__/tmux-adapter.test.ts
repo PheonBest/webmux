@@ -301,7 +301,7 @@ describe("ensureSessionLayout", () => {
         buildEnv({ WEBMUX_ISOLATED_TMUX_CONFIG: configPath }),
       ));
       expect(result.globalPaneBaseIndex).toBe("1");
-      expect(result.relatedPaneIndexes).toEqual(["0", "1"]);
+      expect(result.relatedPaneIndexes).toEqual(["0", "1", "2"]);
       expect(result.unrelatedPaneIndexes).toEqual(["1"]);
     } finally {
       await rm(testRoot, { recursive: true, force: true });

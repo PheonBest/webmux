@@ -438,13 +438,13 @@ describe("LifecycleService", () => {
       {
         sessionName: buildProjectSessionName(repoRoot),
         windowName: buildWorktreeWindowName("feature/search"),
-        paneCount: 2,
+        paneCount: 3,
       },
     ]);
 
     const state = runtime.getWorktreeByBranch("feature/search");
     expect(state?.session.exists).toBe(true);
-    expect(state?.session.paneCount).toBe(2);
+    expect(state?.session.paneCount).toBe(3);
   });
 
   it("writes no control.env when no control base URL is configured", async () => {
@@ -1817,7 +1817,7 @@ describe("LifecycleService", () => {
       {
         sessionName: buildProjectSessionName(repoRoot),
         windowName: buildWorktreeWindowName("feature-profile"),
-        paneCount: 2,
+        paneCount: 3,
       },
     ]);
     expect(tmux.commands.map((entry) => entry.command)).toContainEqual("bun run dev");
@@ -1848,7 +1848,7 @@ describe("LifecycleService", () => {
     tmux.commands.length = 0;
     await lifecycle.openWorktree("feature-profile-closed");
 
-    expect(tmux.listWindows()[0]?.paneCount).toBe(2);
+    expect(tmux.listWindows()[0]?.paneCount).toBe(3);
     expect(tmux.commands.map((entry) => entry.command)).toContainEqual("bun run dev");
   });
 
@@ -1946,7 +1946,7 @@ describe("LifecycleService", () => {
       {
         sessionName: buildProjectSessionName(repoRoot),
         windowName: buildWorktreeWindowName("feature-sandbox"),
-        paneCount: 1,
+        paneCount: 2,
       },
     ]);
 

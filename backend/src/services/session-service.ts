@@ -64,6 +64,16 @@ function resolvePaneStartupCommand(template: PaneTemplate, ctx: SessionLayoutCon
   }
 }
 
+/** Every profile always gets one more pane beyond what `.webmux.yaml`
+ *  configures: a plain empty shell, for ad-hoc commands without disturbing
+ *  the configured layout (visible as an extra entry in the mobile pane
+ *  switcher). */
+const EXTRA_TERMINAL_PANE_TEMPLATE: PaneTemplate = {
+  id: "terminal",
+  kind: "shell",
+  split: "bottom",
+};
+
 export function planSessionLayout(
   projectRoot: string,
   branch: string,
@@ -74,7 +84,8 @@ export function planSessionLayout(
     throw new Error("At least one pane template is required");
   }
 
-  const panes = templates.map((template, index) => {
+  const allTemplates = [...templates, EXTRA_TERMINAL_PANE_TEMPLATE];
+  const panes = allTemplates.map((template, index) => {
     const startupCommand = resolvePaneStartupCommand(template, ctx);
     return {
       id: template.id,

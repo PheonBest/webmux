@@ -122,6 +122,14 @@ describe("planSessionLayout", () => {
         focus: false,
         split: "bottom",
       },
+      {
+        id: "terminal",
+        index: 3,
+        kind: "shell",
+        cwd: "/repo/project/__worktrees/feature-search",
+        focus: false,
+        split: "bottom",
+      },
     ]);
     expect(plan.focusPaneIndex).toBe(0);
   });
