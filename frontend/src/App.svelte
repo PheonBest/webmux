@@ -647,19 +647,30 @@
     refreshLinear();
   }
 
-  function openCreateDialog(issue: LinearIssue | null = null): void {
+  async function ensureConfigLoaded(): Promise<void> {
+    if (config.agents.length > 0) return;
+    try {
+      config = await api.fetchConfig();
+    } catch (err) {
+      console.error("Failed to load config:", err);
+    }
+  }
+
+  async function openCreateDialog(issue: LinearIssue | null = null): Promise<void> {
     includeRemoteBranches = false;
     branchListMode = "existing";
     assignIssue = issue;
     lockedBaseBranch = null;
+    await ensureConfigLoaded();
     showCreateDialog = true;
   }
 
-  function openSubworktreeDialog(parentBranch: string): void {
+  async function openSubworktreeDialog(parentBranch: string): Promise<void> {
     includeRemoteBranches = false;
     branchListMode = "existing";
     assignIssue = null;
     lockedBaseBranch = parentBranch;
+    await ensureConfigLoaded();
     showCreateDialog = true;
   }
 
@@ -1183,12 +1194,7 @@
 
   onMount(() => {
     applyTheme(currentTheme);
-    api
-      .fetchConfig()
-      .then((c) => {
-        config = c;
-      })
-      .catch(() => {});
+    void ensureConfigLoaded();
     refresh();
     refreshLinear();
     let intervalMs = pollIntervalMs;

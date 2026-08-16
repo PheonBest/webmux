@@ -531,6 +531,21 @@ describe("App create selection", () => {
     expect(screen.queryByTitle("feature/new")).not.toBeInTheDocument();
   });
 
+  it("waits for config to load before opening the dialog, instead of showing no agents", async () => {
+    const configResult = deferred<AppConfig>();
+    vi.mocked(api.fetchConfig).mockReturnValueOnce(configResult.promise);
+
+    render(App);
+
+    await fireEvent.click(screen.getByTitle("New Worktree (Cmd+K)"));
+
+    configResult.resolve(createConfig());
+
+    await screen.findByText("New Worktree");
+    expect(screen.queryByText("No agents available.")).not.toBeInTheDocument();
+    expect(screen.getByText("Claude")).toBeInTheDocument();
+  });
+
   it("selects the new worktree when nothing was selected before creation", async () => {
     const creatingWorktree = createWorktree("feature/new", {
       creating: true,
