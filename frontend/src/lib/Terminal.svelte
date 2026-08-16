@@ -67,6 +67,10 @@
     document.body.removeChild(ta);
   }
 
+  function scrollToBottom(): void {
+    term?.scrollToBottom();
+  }
+
   export function sendSelectPane(pane: number) {
     if (ws?.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: "selectPane", pane }));
@@ -492,5 +496,20 @@
     <div class="absolute inset-0 z-10 flex items-center justify-center bg-black/50 border-2 border-dashed border-[var(--color-accent)] rounded pointer-events-none">
       <span class="text-white text-sm font-medium">Drop image(s) to upload</span>
     </div>
+  {/if}
+
+  {#if isMobile}
+    <button
+      type="button"
+      aria-label="Scroll to bottom"
+      title="Scroll to bottom"
+      class="absolute right-3 bottom-3 z-20 flex size-9 items-center justify-center rounded-full border border-edge bg-surface/60 text-primary shadow-lg backdrop-blur-sm active:bg-surface/90"
+      onclick={scrollToBottom}
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 5v14" />
+        <path d="m19 12-7 7-7-7" />
+      </svg>
+    </button>
   {/if}
 </div>

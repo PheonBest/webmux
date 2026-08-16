@@ -29,6 +29,7 @@ const { MockFitAddon, MockTerminal } = vi.hoisted(() => {
     write = vi.fn();
     clearSelection = vi.fn();
     dispose = vi.fn();
+    scrollToBottom = vi.fn();
 
     constructor(_options: unknown) {
       MockTerminal.instances.push(this);
@@ -226,5 +227,33 @@ describe("Terminal reconnect", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
 
     expect(onrefreshagentterminal).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a scroll-to-bottom button on mobile that scrolls the terminal", async () => {
+    render(Terminal, {
+      props: {
+        worktree: "feature/mobile-scroll",
+        terminalTheme: getTheme("github-dark").terminal,
+        isMobile: true,
+      },
+    });
+
+    const terminal = MockTerminal.instances[0]!;
+    const button = screen.getByRole("button", { name: "Scroll to bottom" });
+    await fireEvent.click(button);
+
+    expect(terminal.scrollToBottom).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides the scroll-to-bottom button on desktop", () => {
+    render(Terminal, {
+      props: {
+        worktree: "feature/desktop-scroll",
+        terminalTheme: getTheme("github-dark").terminal,
+        isMobile: false,
+      },
+    });
+
+    expect(screen.queryByRole("button", { name: "Scroll to bottom" })).not.toBeInTheDocument();
   });
 });
