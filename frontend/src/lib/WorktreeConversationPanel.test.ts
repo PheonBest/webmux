@@ -63,6 +63,7 @@ function renderPanel({
   onAnswerQuestion?: (text: string) => void;
 } = {}) {
   const onInterrupt = vi.fn();
+  const onSend = vi.fn();
 
   render(WorktreeConversationPanel, {
     props: {
@@ -76,12 +77,12 @@ function renderPanel({
       onComposerInput: vi.fn(),
       onInterrupt,
       onRefresh: vi.fn(),
-      onSend: vi.fn(),
+      onSend,
       onAnswerQuestion,
     },
   });
 
-  return { onInterrupt, onAnswerQuestion };
+  return { onInterrupt, onSend, onAnswerQuestion };
 }
 
 describe("WorktreeConversationPanel", () => {
@@ -131,6 +132,17 @@ describe("WorktreeConversationPanel", () => {
 
     expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Interrupt" })).not.toBeInTheDocument();
+  });
+
+  it("lets Enter insert a newline instead of sending, and requires the Send button", async () => {
+    const { onSend } = renderPanel({ composerText: "hello" });
+
+    const composer = screen.getByLabelText("Message");
+    await fireEvent.keyDown(composer, { key: "Enter" });
+    expect(onSend).not.toHaveBeenCalled();
+
+    await fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(onSend).toHaveBeenCalledTimes(1);
   });
 
   it("does not duplicate the stale terminal banner inside chat", () => {

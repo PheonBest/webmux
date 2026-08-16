@@ -82,14 +82,6 @@
     onComposerInput(target.value);
   }
 
-  function handleComposerKeydown(event: KeyboardEvent): void {
-    if (event.key !== "Enter" || event.shiftKey) return;
-    event.preventDefault();
-    if (canSend) {
-      onSend();
-    }
-  }
-
   async function scrollTranscriptToBottom(): Promise<void> {
     await tick();
     transcriptViewport?.scrollTo({
@@ -376,7 +368,6 @@
           placeholder="ask anything"
           value={composerText}
           oninput={handleComposerInput}
-          onkeydown={handleComposerKeydown}
           disabled={isSending}
         ></textarea>
 
