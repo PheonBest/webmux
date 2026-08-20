@@ -537,13 +537,31 @@ export function gitRoot(dir: string): string {
   return root || dir;
 }
 
-/** Resolve the shared project root for a repository, even from a linked worktree. */
+/** Resolve the shared project root for a repository, even from a linked worktree.
+ *
+ *  For a linked worktree, `--git-common-dir` points at the main repo's `.git`,
+ *  so its dirname is the main repo root. For a submodule, `--git-common-dir`
+ *  is identical to `--git-dir` (there's no separate common dir to share) and
+ *  points at `<superproject>/.git/modules/<name>` — taking its dirname would
+ *  land one level too high, on the `modules` directory itself. Only apply the
+ *  dirname trick when common-dir and git-dir actually diverge (the linked-
+ *  worktree case); otherwise fall back to the worktree's own toplevel, which
+ *  already resolves submodules correctly. */
 export function projectRoot(dir: string): string {
-  const result = Bun.spawnSync(["git", "rev-parse", "--git-common-dir"], { stdout: "pipe", stderr: "pipe", cwd: dir });
-  if (result.exitCode !== 0) return gitRoot(dir);
+  const commonResult = Bun.spawnSync(["git", "rev-parse", "--git-common-dir"], { stdout: "pipe", stderr: "pipe", cwd: dir });
+  if (commonResult.exitCode !== 0) return gitRoot(dir);
 
-  const commonDir = new TextDecoder().decode(result.stdout).trim();
-  return commonDir ? dirname(resolve(dir, commonDir)) : gitRoot(dir);
+  const commonDir = new TextDecoder().decode(commonResult.stdout).trim();
+  if (!commonDir) return gitRoot(dir);
+
+  const gitDirResult = Bun.spawnSync(["git", "rev-parse", "--git-dir"], { stdout: "pipe", stderr: "pipe", cwd: dir });
+  const gitDir = gitDirResult.exitCode === 0 ? new TextDecoder().decode(gitDirResult.stdout).trim() : "";
+
+  const resolvedCommonDir = resolve(dir, commonDir);
+  const resolvedGitDir = gitDir ? resolve(dir, gitDir) : resolvedCommonDir;
+  if (resolvedCommonDir === resolvedGitDir) return gitRoot(dir);
+
+  return dirname(resolvedCommonDir);
 }
 
 /** Load `.webmux.yaml` from the shared project root into the final project config shape. */
