@@ -142,6 +142,10 @@
   let nextAvailableBranchFetchId = 0;
   let nextBaseBranchFetchId = 0;
   let sshHost = $state(localStorage.getItem(SSH_STORAGE_KEY) ?? "");
+  // agent-flow (github.com/patoles/agent-flow) runs alongside webmux on the same host,
+  // installed by webmux-machine-setup.sh — reuse whatever host/protocol got us to webmux
+  // itself so this keeps working over SSH tunnels/reverse proxies, not just localhost.
+  let agentFlowUrl = `${window.location.protocol}//${window.location.hostname}:3001`;
   let currentTheme = $state<ThemeKey>(loadSavedTheme());
   let useWebChatUi = $state(loadUseWebChatUi());
   let terminalTheme = $derived(getTheme(currentTheme).terminal);
@@ -1305,6 +1309,21 @@
             <ProjectSwitcher current={activePrefix} label={config.name ?? "Dashboard"} />
           </div>
           <div class="flex items-center gap-2">
+            <a
+              href={agentFlowUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              class="h-8 w-8 rounded-md border border-edge bg-surface text-muted flex items-center justify-center cursor-pointer hover:bg-hover hover:text-primary"
+              title="Open Agent Flow (live agent view)"
+              aria-label="Open Agent Flow"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="6" cy="6" r="2.5" />
+                <circle cx="18" cy="6" r="2.5" />
+                <circle cx="12" cy="18" r="2.5" />
+                <path d="M8.2 7.2 L11 15.5 M15.8 7.2 L13 15.5 M8.5 6 L15.5 6" />
+              </svg>
+            </a>
             <button
               class="h-8 px-2 gap-1.5 rounded-md border border-edge bg-surface text-accent text-xs flex items-center justify-center cursor-pointer hover:bg-hover disabled:opacity-50 disabled:cursor-not-allowed"
               onclick={() => openCreateDialog()}
