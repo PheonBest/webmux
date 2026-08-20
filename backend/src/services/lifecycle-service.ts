@@ -1320,11 +1320,13 @@ export class LifecycleService {
    *  at a branch that's no longer actually checked out there. */
   private async prepareDirectSessionSwitch(targetBranch: string): Promise<void> {
     const projectRoot = resolve(this.deps.projectRoot);
+    const currentBranch = this.deps.git.currentBranch(projectRoot);
     // Untracked files — including webmux's own `.claude`/`.codex` agent-runtime
     // artifacts written into the main repo by a previous direct session — don't
     // block this switch; only real uncommitted work to tracked files does.
-    if (this.deps.git.hasUncommittedTrackedChanges(projectRoot)) {
-      const currentBranch = this.deps.git.currentBranch(projectRoot);
+    // And when the target branch is already the one checked out, no checkout
+    // actually happens, so a dirty tree isn't a conflict at all.
+    if (targetBranch !== currentBranch && this.deps.git.hasUncommittedTrackedChanges(projectRoot)) {
       const trackedChanges = this.deps.git.readStatus(projectRoot)
         .split("\n")
         .filter((line) => line.length > 0 && !line.startsWith("??"));

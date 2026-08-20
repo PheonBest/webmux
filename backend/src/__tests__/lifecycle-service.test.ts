@@ -1159,6 +1159,24 @@ describe("LifecycleService", () => {
       expect(run(["git", "branch", "--show-current"], repoRoot)).toBe("main");
     });
 
+    it("allows running directly on the branch already checked out, even with uncommitted changes", async () => {
+      const repoRoot = await initRepo();
+      const runtime = new ProjectRuntime();
+      const tmux = new FakeTmuxGateway();
+      const lifecycle = makeLifecycleService(repoRoot, tmux, runtime);
+
+      // main is already checked out — no branch switch is actually needed,
+      // so a dirty tree shouldn't block "direct" mode targeting main itself.
+      await Bun.write(join(repoRoot, "README.md"), "# repo\nuncommitted local change\n");
+
+      const created = await lifecycle.createWorktree({ mode: "direct", branch: "main" });
+
+      expect(created.branch).toBe("main");
+      expect(run(["git", "branch", "--show-current"], repoRoot)).toBe("main");
+      // The uncommitted change survived — nothing was relocated or discarded.
+      expect(await Bun.file(join(repoRoot, "README.md")).text()).toContain("uncommitted local change");
+    });
+
     it("attaches a machine-readable code to the blocked-switch error", async () => {
       const repoRoot = await initRepo();
       const runtime = new ProjectRuntime();

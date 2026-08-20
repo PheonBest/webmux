@@ -487,13 +487,14 @@ export class BunGitGateway implements GitGateway {
 
   createWorktree(opts: CreateGitWorktreeOptions): void {
     if (opts.mode === "direct") {
+      const currentBranch = currentCheckoutRef(opts.repoRoot).branch;
       // Untracked files (e.g. webmux's own `.claude/`/`.codex/` agent-runtime
       // artifacts, written straight into the main repo for a direct session)
       // don't block `git checkout` and shouldn't block switching branches
       // here either — only actual tracked changes (staged or unstaged) count
-      // as "dirty" for this guard.
-      if (hasUncommittedTrackedChanges(opts.repoRoot)) {
-        const currentBranch = currentCheckoutRef(opts.repoRoot).branch;
+      // as "dirty" for this guard. And when the branch is already checked
+      // out, there's no checkout to perform, so a dirty tree is fine.
+      if (opts.branch !== currentBranch && hasUncommittedTrackedChanges(opts.repoRoot)) {
         throw new Error(
           `Cannot check out '${opts.branch}' directly in the main repo (currently on '${currentBranch ?? "detached HEAD"}') — it has uncommitted changes. Commit or stash them first.`,
         );
