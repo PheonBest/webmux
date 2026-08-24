@@ -363,6 +363,7 @@
             <button
               type="button"
               class="text-[11px] text-accent hover:underline"
+              title="Isolated worktree directory — multiple branches can be open at once"
               onclick={openExistingBranchSelector}
             >
               Use existing branch
@@ -370,6 +371,7 @@
             <button
               type="button"
               class="text-[11px] text-accent hover:underline"
+              title="Shares the main repo's own checkout — only one direct session at a time"
               onclick={openDirectBranchSelector}
             >
               Run directly on branch (no worktree)
@@ -380,6 +382,7 @@
             <button
               type="button"
               class="text-[11px] text-accent hover:underline"
+              title="Isolated worktree directory — multiple branches can be open at once"
               onclick={openExistingBranchSelector}
             >
               Use existing branch
@@ -387,6 +390,7 @@
             <button
               type="button"
               class="text-[11px] text-accent hover:underline"
+              title="Shares the main repo's own checkout — only one direct session at a time"
               onclick={openDirectBranchSelector}
             >
               Run directly on branch (no worktree)
@@ -416,7 +420,9 @@
           Create new branch instead
         </button>
         <p class="mt-2 text-[11px] text-muted">
-          Removing this worktree will also delete the branch.
+          Creates a separate worktree directory checked out to this branch, isolated from any
+          other session — multiple branches (including this one) can be open at once. Removing
+          this worktree will also delete the branch.
         </p>
       {:else}
         <BranchSelector
