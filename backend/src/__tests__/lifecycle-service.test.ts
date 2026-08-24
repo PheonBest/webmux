@@ -1208,6 +1208,29 @@ describe("LifecycleService", () => {
       expect(commands).toContain("uncommitted changes blocking a direct-mode switch");
     });
 
+    it("recoverDirectSwitchConflict appends the caller's original prompt after the recovery instructions", async () => {
+      const repoRoot = await initRepo();
+      const runtime = new ProjectRuntime();
+      const tmux = new FakeTmuxGateway();
+      const lifecycle = makeLifecycleService(repoRoot, tmux, runtime);
+
+      await Bun.write(join(repoRoot, "README.md"), "# repo\nuncommitted local change\n");
+
+      const result = await lifecycle.recoverDirectSwitchConflict({
+        targetBranch: "release/dirty-target",
+        prompt: "add a health check endpoint",
+      });
+
+      const commands = tmux.commands.map((c) => c.command).join("\n");
+      expect(commands).toContain("uncommitted changes blocking a direct-mode switch");
+      expect(commands).toContain("add a health check endpoint");
+      // The recovery instructions must come first, the original prompt after.
+      expect(commands.indexOf("uncommitted changes blocking a direct-mode switch")).toBeLessThan(
+        commands.indexOf("add a health check endpoint"),
+      );
+      expect(result.branch).toMatch(/^resolve-main-/);
+    });
+
     it("recoverDirectSwitchConflict throws when there is nothing to recover", async () => {
       const repoRoot = await initRepo();
       const runtime = new ProjectRuntime();
@@ -2324,6 +2347,36 @@ describe("LifecycleService", () => {
     expect(new BunGitGateway().listWorktrees(repoRoot).some((entry) => entry.path === worktreePath)).toBe(false);
     expect(run(["git", "branch", "--list", "feature-merge"], repoRoot)).toBe("");
     expect(await Bun.file(join(repoRoot, "README.md")).text()).toContain("merged change");
+  });
+
+  it("blocks merging a worktree while a direct session is active, naming the blocking branch", async () => {
+    const repoRoot = await initRepo();
+    const runtime = new ProjectRuntime();
+    const tmux = new FakeTmuxGateway();
+    const lifecycle = makeLifecycleService(repoRoot, tmux, runtime);
+
+    await lifecycle.createWorktree({ branch: "feature-merge-blocked" });
+    const worktreePath = join(repoRoot, "__worktrees", "feature-merge-blocked");
+    await Bun.write(join(worktreePath, "README.md"), "# merged change\n");
+    run(["git", "add", "README.md"], worktreePath);
+    run(["git", "commit", "-m", "feature change"], worktreePath);
+    // Worktree creation copies any untracked scaffold files (e.g. local agent
+    // config) from the repo root into the new worktree — wipe those so the
+    // uncommitted-changes guard doesn't fire before the check under test.
+    run(["git", "clean", "-fdx"], worktreePath);
+
+    run(["git", "checkout", "-b", "release/direct"], repoRoot);
+    run(["git", "checkout", "main"], repoRoot);
+    await lifecycle.createWorktree({ mode: "direct", branch: "release/direct" });
+
+    try {
+      await lifecycle.mergeWorktree("feature-merge-blocked");
+      throw new Error("expected mergeWorktree to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(LifecycleError);
+      expect((error as LifecycleError).code).toBe("merge_blocked_by_direct_session");
+      expect((error as LifecycleError).blockingBranch).toBe("release/direct");
+    }
   });
 
   it("merges and cleans up a worktree even when the source branch is ahead", async () => {

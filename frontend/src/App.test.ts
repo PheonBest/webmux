@@ -103,11 +103,13 @@ const { MockApiError } = vi.hoisted(() => {
   class MockApiError extends Error {
     status: number;
     code?: string;
-    constructor(message: string, status: number, code?: string) {
+    blockingBranch?: string;
+    constructor(message: string, status: number, code?: string, blockingBranch?: string) {
       super(message);
       this.name = "ApiError";
       this.status = status;
       this.code = code;
+      this.blockingBranch = blockingBranch;
     }
   }
   return { MockApiError };
@@ -642,11 +644,80 @@ describe("App create selection", () => {
 
     await waitFor(() => {
       expect(confirmSpy).toHaveBeenCalled();
-      expect(recoverDirectSwitch).toHaveBeenCalledWith("main");
+      expect(recoverDirectSwitch).toHaveBeenCalledWith("main", undefined);
     });
 
     const toast = await screen.findByRole("alert");
     expect(toast).toHaveTextContent("resolve-main-abc123");
+
+    vi.unstubAllGlobals();
+  });
+
+  it("offers to close the blocking direct session and retries the merge", async () => {
+    const worktree = createWorktree("feature/x");
+    vi.mocked(fetchWorktrees).mockResolvedValue([worktree]);
+    vi.mocked(api.mergeWorktree)
+      .mockRejectedValueOnce(
+        new ApiError(
+          'Cannot merge worktree branches while a direct (no-worktree) session is active on "release/direct" — it uses the main repo\'s own checkout, which this merge would have to check out over.',
+          409,
+          "merge_blocked_by_direct_session",
+          "release/direct",
+        ),
+      )
+      .mockResolvedValueOnce({ ok: true });
+    const confirmSpy = vi.fn().mockReturnValue(true);
+    vi.stubGlobal("confirm", confirmSpy);
+
+    render(App);
+
+    await screen.findByTitle("feature/x");
+    await fireEvent.click(screen.getByLabelText("Actions for feature/x"));
+    const menu = document.querySelector("[data-worktree-row-menu]") as HTMLElement;
+    await fireEvent.click(within(menu).getByText("Merge"));
+    const confirmMergeButton = screen
+      .getAllByRole("button", { name: "Merge" })
+      .find((b) => b.getAttribute("type") === "submit") as HTMLElement;
+    await fireEvent.click(confirmMergeButton);
+
+    await waitFor(() => {
+      expect(confirmSpy).toHaveBeenCalled();
+      expect(api.closeWorktree).toHaveBeenCalledWith({ params: { name: "release/direct" } });
+      expect(api.mergeWorktree).toHaveBeenCalledTimes(2);
+    });
+
+    vi.unstubAllGlobals();
+  });
+
+  it("forwards the caller's original prompt into the direct-switch recovery", async () => {
+    vi.mocked(fetchWorktrees).mockResolvedValue([]);
+    vi.mocked(api.fetchAvailableBranches).mockResolvedValue({ branches: [{ name: "main" }] });
+    vi.mocked(api.createWorktree).mockRejectedValueOnce(
+      new ApiError("has uncommitted changes", 409, "direct_switch_dirty"),
+    );
+    vi.mocked(recoverDirectSwitch).mockResolvedValueOnce({
+      branch: "resolve-main-abc123",
+      worktreeId: "wt-1",
+    });
+    const confirmSpy = vi.fn().mockReturnValue(true);
+    vi.stubGlobal("confirm", confirmSpy);
+
+    render(App);
+
+    await screen.findByText("Select a worktree");
+    await fireEvent.click(screen.getByTitle("New Worktree (Cmd+K)"));
+    await screen.findByText("New Worktree");
+    await fireEvent.click(screen.getByText("Run directly on branch (no worktree)"));
+    await fireEvent.click(await screen.findByRole("button", { name: "main" }));
+    await fireEvent.input(screen.getByLabelText(/Prompt/i), {
+      target: { value: "add a health check endpoint" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() => {
+      expect(confirmSpy).toHaveBeenCalled();
+      expect(recoverDirectSwitch).toHaveBeenCalledWith("main", "add a health check endpoint");
+    });
 
     vi.unstubAllGlobals();
   });

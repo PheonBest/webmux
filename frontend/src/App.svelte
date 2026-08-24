@@ -729,7 +729,7 @@
       // repo — offer the explicit opt-in recovery (relocate those changes
       // into a new temporary worktree + agent) instead of a plain error.
       if (err instanceof ApiError && err.code === "direct_switch_dirty" && finalRequest.mode === "direct" && finalRequest.branch) {
-        await offerDirectSwitchRecovery(err.message, finalRequest.branch);
+        await offerDirectSwitchRecovery(err.message, finalRequest.branch, finalRequest.prompt);
       } else {
         showToast({ tone: "error", message: `Failed to create: ${errorMessage(err)}` });
       }
@@ -747,7 +747,7 @@
    *  a distinct confirm step + endpoint, not automatic — it creates new git
    *  state (a branch + worktree) as a side effect of what looked like a
    *  simple "switch branch" action. */
-  async function offerDirectSwitchRecovery(message: string, targetBranch: string): Promise<void> {
+  async function offerDirectSwitchRecovery(message: string, targetBranch: string, prompt?: string): Promise<void> {
     const wantsRecovery = confirm(
       `${message}\n\nResolve in a new worktree? This relocates the uncommitted changes into a new temporary worktree and launches an agent there to help you review them.`,
     );
@@ -756,7 +756,7 @@
       return;
     }
     try {
-      const result = await recoverDirectSwitch(targetBranch);
+      const result = await recoverDirectSwitch(targetBranch, prompt);
       invalidateBranchCaches();
       await refresh();
       selectedBranch = result.branch;
@@ -829,7 +829,7 @@
 
     removingBranches = new Set([...removingBranches, branch]);
     try {
-      await api.mergeWorktree({ params: { name: branch } });
+      await mergeWorktreeWithRecovery(branch);
       invalidateBranchCaches();
       await refresh();
     } catch (err) {
@@ -838,6 +838,30 @@
       removingBranches = new Set(
         [...removingBranches].filter((b) => b !== branch),
       );
+    }
+  }
+
+  /** Merge, offering to close a blocking direct (no-worktree) session and
+   *  retry when the backend reports ApiError.code
+   *  "merge_blocked_by_direct_session" (see MERGE_BLOCKED_BY_DIRECT_SESSION_ERROR_CODE). */
+  async function mergeWorktreeWithRecovery(branch: string): Promise<void> {
+    try {
+      await api.mergeWorktree({ params: { name: branch } });
+    } catch (err) {
+      if (
+        err instanceof ApiError &&
+        err.code === "merge_blocked_by_direct_session" &&
+        err.blockingBranch
+      ) {
+        const wantsClose = confirm(
+          `${err.message}\n\nClose that session and retry the merge?`,
+        );
+        if (!wantsClose) throw err;
+        await api.closeWorktree({ params: { name: err.blockingBranch } });
+        await api.mergeWorktree({ params: { name: branch } });
+        return;
+      }
+      throw err;
     }
   }
 

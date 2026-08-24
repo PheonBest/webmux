@@ -5,6 +5,9 @@ export function jsonResponse(data: unknown, status = 200): Response {
   });
 }
 
-export function errorResponse(message: string, status = 500, code?: string): Response {
-  return jsonResponse(code ? { error: message, code } : { error: message }, status);
+export function errorResponse(message: string, status = 500, code?: string, blockingBranch?: string): Response {
+  return jsonResponse(
+    { error: message, ...(code ? { code } : {}), ...(blockingBranch ? { blockingBranch } : {}) },
+    status,
+  );
 }

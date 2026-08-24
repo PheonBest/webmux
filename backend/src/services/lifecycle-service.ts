@@ -272,6 +272,8 @@ interface ExistingBranchResolution {
   deleteBranchOnRollback: boolean;
 }
 
+export const MERGE_BLOCKED_BY_DIRECT_SESSION_ERROR_CODE = "merge_blocked_by_direct_session";
+
 export class LifecycleError extends Error {
   constructor(
     message: string,
@@ -280,6 +282,10 @@ export class LifecycleError extends Error {
      *  a specific failure without string-matching `message`. See
      *  DIRECT_SWITCH_DIRTY_ERROR_CODE for the one currently defined. */
     readonly code?: string,
+    /** Branch blocking the operation, present alongside
+     *  MERGE_BLOCKED_BY_DIRECT_SESSION_ERROR_CODE so the caller can offer to
+     *  close it and retry. */
+    readonly blockingBranch?: string,
   ) {
     super(message);
   }
@@ -757,11 +763,14 @@ export class LifecycleService {
       });
       await ensureAgentRuntimeArtifacts({ gitDir: initialized.paths.gitDir, worktreePath });
 
-      const recoveryPrompt = input.prompt?.trim() || this.buildDirtySwitchRecoveryPrompt({
+      const dirtySwitchRecoveryPrompt = this.buildDirtySwitchRecoveryPrompt({
         currentBranch,
         targetBranch: input.targetBranch,
         worktreePath,
       });
+      const recoveryPrompt = input.prompt?.trim()
+        ? `${dirtySwitchRecoveryPrompt}\n\nOnce that's resolved, please also help with: ${input.prompt.trim()}`
+        : dirtySwitchRecoveryPrompt;
 
       await this.materializeRuntimeSession({
         branch: tempBranch,
@@ -1013,6 +1022,8 @@ export class LifecycleService {
         throw new LifecycleError(
           `Cannot merge worktree branches while a direct (no-worktree) session is active on "${rootDirectMeta.branch}" — it uses the main repo's own checkout, which this merge would have to check out over.`,
           409,
+          MERGE_BLOCKED_BY_DIRECT_SESSION_ERROR_CODE,
+          rootDirectMeta.branch,
         );
       }
 

@@ -492,7 +492,7 @@ function sendAgentsWs(ws: { readyState: number; send: (data: string) => void }, 
 function catching(label: string, fn: () => Promise<Response>): Promise<Response> {
   return fn().catch((err: unknown) => {
     if (err instanceof LifecycleError) {
-      return errorResponse(err.message, err.status, err.code);
+      return errorResponse(err.message, err.status, err.code, err.blockingBranch);
     }
 
     const msg = err instanceof Error ? err.message : String(err);

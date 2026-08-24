@@ -69,6 +69,7 @@ export class ApiError extends Error {
     message: string,
     readonly status: number,
     readonly code?: string,
+    readonly blockingBranch?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -80,13 +81,16 @@ function unwrapResponse(response: unknown): unknown {
     throw new Error("Malformed API client response");
   }
   if (response.status < 200 || response.status >= 300) {
-    const { message, code } = errorDetailsFromResponse(response.body, response.status);
-    throw new ApiError(message, response.status, code);
+    const { message, code, blockingBranch } = errorDetailsFromResponse(response.body, response.status);
+    throw new ApiError(message, response.status, code, blockingBranch);
   }
   return response.body;
 }
 
-function errorDetailsFromResponse(body: unknown, status: number): { message: string; code?: string } {
+function errorDetailsFromResponse(
+  body: unknown,
+  status: number,
+): { message: string; code?: string; blockingBranch?: string } {
   if (typeof body === "string") {
     try {
       return errorDetailsFromResponse(JSON.parse(body) as unknown, status);
@@ -96,7 +100,9 @@ function errorDetailsFromResponse(body: unknown, status: number): { message: str
   }
   if (body && typeof body === "object" && "error" in body && typeof body.error === "string") {
     const code = "code" in body && typeof body.code === "string" ? body.code : undefined;
-    return { message: body.error, ...(code ? { code } : {}) };
+    const blockingBranch =
+      "blockingBranch" in body && typeof body.blockingBranch === "string" ? body.blockingBranch : undefined;
+    return { message: body.error, ...(code ? { code } : {}), ...(blockingBranch ? { blockingBranch } : {}) };
   }
   return { message: `HTTP ${status}` };
 }

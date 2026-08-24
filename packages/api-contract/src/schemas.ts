@@ -12,6 +12,9 @@ export const ErrorResponseSchema = z.object({
    *  need to branch on programmatically (e.g. "direct_switch_dirty") rather
    *  than string-matching `error`. Absent for most errors. */
   code: z.string().optional(),
+  /** Branch name blocking the requested operation, present alongside
+   *  "merge_blocked_by_direct_session" so the caller can offer to close it. */
+  blockingBranch: z.string().optional(),
 });
 
 export const OkResponseSchema = z.object({
