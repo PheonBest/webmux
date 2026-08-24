@@ -67,6 +67,25 @@
     }
   }
 
+  // Arrow-key nav between an option group's buttons (Up/Left = previous,
+  // Down/Right = next), so a question with many options doesn't require Tab.
+  function handleOptionKeydown(event: KeyboardEvent): void {
+    const isNext = event.key === "ArrowDown" || event.key === "ArrowRight";
+    const isPrev = event.key === "ArrowUp" || event.key === "ArrowLeft";
+    if (!isNext && !isPrev) return;
+    const button = event.currentTarget as HTMLButtonElement;
+    const group = button.parentElement;
+    if (!group) return;
+    const buttons = Array.from(group.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
+    if (buttons.length === 0) return;
+    event.preventDefault();
+    const currentIndex = buttons.indexOf(button);
+    const nextIndex = currentIndex === -1
+      ? 0
+      : (currentIndex + (isNext ? 1 : -1) + buttons.length) % buttons.length;
+    buttons[nextIndex]?.focus();
+  }
+
   function handleCustomKeydown(event: KeyboardEvent, qIndex: number): void {
     if (event.key !== "Enter" || event.shiftKey) return;
     event.preventDefault();
@@ -92,7 +111,7 @@
       <div class="flex min-w-0 flex-col gap-2">
         <div class="text-[10px] uppercase tracking-[0.12em] text-muted">{question.header}</div>
         <div class="text-sm text-primary">{question.question}</div>
-        <div class="flex flex-wrap gap-2">
+        <div class="flex flex-wrap gap-2" role="group">
           {#each question.options as option (option.label)}
             <button
               type="button"
@@ -103,6 +122,7 @@
               }`}
               {disabled}
               onclick={() => toggleOption(qIndex, option.label)}
+              onkeydown={handleOptionKeydown}
             >
               <span class="block break-words font-medium">{option.label}</span>
               {#if option.description}

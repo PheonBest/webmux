@@ -73,6 +73,24 @@ describe("AskUserQuestionCard", () => {
     expect(onSubmit).toHaveBeenCalledWith("Toppings: Cheese, Olives");
   });
 
+  it("moves focus between options with the arrow keys", async () => {
+    render(AskUserQuestionCard, { props: { input: multiSelect, disabled: false, onSubmit: vi.fn() } });
+
+    const cheese = screen.getByRole("button", { name: "Cheese" });
+    const olives = screen.getByRole("button", { name: "Olives" });
+    cheese.focus();
+    expect(cheese).toHaveFocus();
+
+    await fireEvent.keyDown(cheese, { key: "ArrowDown" });
+    expect(olives).toHaveFocus();
+
+    await fireEvent.keyDown(olives, { key: "ArrowDown" });
+    expect(cheese).toHaveFocus();
+
+    await fireEvent.keyDown(cheese, { key: "ArrowUp" });
+    expect(olives).toHaveFocus();
+  });
+
   it("does not submit when disabled", async () => {
     const onSubmit = vi.fn();
     render(AskUserQuestionCard, { props: { input: singleSelect, disabled: true, onSubmit } });
