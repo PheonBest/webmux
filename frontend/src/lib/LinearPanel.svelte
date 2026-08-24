@@ -6,11 +6,13 @@
   let {
     issues,
     availability,
+    linearProjectUrl,
     onassign,
     onselect,
   }: {
     issues: LinearIssue[];
     availability: LinearIssueAvailability;
+    linearProjectUrl: string | null;
     onassign: (issue: LinearIssue) => void;
     onselect: (issue: LinearIssue) => void;
   } = $props();
@@ -35,14 +37,33 @@
 </script>
 
 <div class="border-t border-edge">
-  <button
-    type="button"
-    class="w-full flex items-center justify-between px-4 py-2 text-xs text-muted cursor-pointer bg-transparent border-none hover:bg-hover"
-    onclick={() => (collapsed = !collapsed)}
-  >
-    <span class="font-semibold">Linear{countLabel}</span>
-    <span class="text-[10px]">{collapsed ? "▸" : "▾"}</span>
-  </button>
+  <div class="w-full flex items-center justify-between px-4 py-2 text-xs text-muted">
+    <button
+      type="button"
+      class="flex-1 flex items-center gap-1.5 cursor-pointer bg-transparent border-none text-muted"
+      onclick={() => (collapsed = !collapsed)}
+    >
+      <span class="font-semibold">Linear{countLabel}</span>
+      <span class="text-[10px]">{collapsed ? "▸" : "▾"}</span>
+    </button>
+    {#if linearProjectUrl}
+      <a
+        href={linearProjectUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        title="Open project in Linear"
+        aria-label="Open project in Linear"
+        class="shrink-0 p-1 rounded text-muted hover:text-primary hover:bg-hover"
+        onclick={(e) => e.stopPropagation()}
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+          <polyline points="15 3 21 3 21 9" />
+          <line x1="10" y1="14" x2="21" y2="3" />
+        </svg>
+      </a>
+    {/if}
+  </div>
 
   {#if !collapsed}
     {#if availability === "missing_api_key"}

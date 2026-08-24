@@ -65,6 +65,12 @@ webmux service restart
 
 Your assigned issues appear in the dashboard once the service restarts.
 
+**Optional — `LINEAR_PROJECT_URL`.** Set this alongside `LINEAR_API_KEY` to add an external-link icon next to the sidebar's Linear section, opening your project's Linear page in a new tab:
+
+```bash
+echo 'LINEAR_PROJECT_URL=https://linear.app/your-team/project/your-project' >> ~/.config/webmux/.env
+```
+
 ## Quick Start
 
 ```bash

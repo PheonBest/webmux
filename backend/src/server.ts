@@ -379,6 +379,7 @@ function getFrontendConfig(): {
   defaultAgentId: ProjectConfig["workspace"]["defaultAgent"];
   autoName: boolean;
   linearCreateTicketOption: boolean;
+  linearProjectUrl: string | null;
   startupEnvs: ProjectConfig["startupEnvs"];
   linkedRepos: Array<{ alias: string; dir?: string }>;
   linearAutoCreateWorktrees: boolean;
@@ -406,6 +407,7 @@ function getFrontendConfig(): {
     defaultAgentId: config.workspace.defaultAgent,
     autoName: config.autoName !== null,
     linearCreateTicketOption: config.integrations.linear.enabled && config.integrations.linear.createTicketOption,
+    linearProjectUrl: Bun.env.LINEAR_PROJECT_URL?.trim() || null,
     startupEnvs: config.startupEnvs,
     linkedRepos: config.integrations.github.linkedRepos.map((lr) => ({
       alias: lr.alias,

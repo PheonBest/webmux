@@ -251,6 +251,7 @@ function createConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     defaultAgentId: "claude",
     autoName: false,
     linearCreateTicketOption: false,
+    linearProjectUrl: null,
     linkedRepos: [],
     linearAutoCreateWorktrees: false,
     autoRemoveOnMerge: false,

@@ -614,6 +614,9 @@ export const AppConfigSchema = z.object({
   defaultAgentId: BuiltInAgentIdSchema,
   autoName: z.boolean(),
   linearCreateTicketOption: z.boolean(),
+  /** LINEAR_PROJECT_URL from .env, if set — lets the sidebar link out to the
+   *  project's Linear page. Null when unset. */
+  linearProjectUrl: z.string().nullable(),
   startupEnvs: z.record(z.union([z.string(), z.boolean()])),
   linkedRepos: z.array(LinkedRepoInfoSchema),
   linearAutoCreateWorktrees: z.boolean(),

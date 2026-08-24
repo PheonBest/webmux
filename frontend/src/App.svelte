@@ -89,6 +89,7 @@
       defaultAgentId: "claude",
       autoName: false,
       linearCreateTicketOption: false,
+      linearProjectUrl: null,
       startupEnvs: {},
       linkedRepos: [],
       linearAutoCreateWorktrees: false,
@@ -1426,6 +1427,7 @@
         <LinearPanel
           issues={linearIssues}
           availability={linearAvailability}
+          linearProjectUrl={config.linearProjectUrl}
           onassign={handleAssignIssue}
           onselect={(issue) => (detailIssue = issue)}
         />
