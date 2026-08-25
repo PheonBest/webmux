@@ -158,14 +158,14 @@ describe("AutoNameService", () => {
     expect(branch).toBe("fix-login-flow");
   });
 
-  it("throws when CLI is not found", async () => {
+  it("falls back to a generated branch name when the CLI is not found, instead of failing worktree creation", async () => {
     const service = new AutoNameService({
       spawnImpl: async () => { throw new Error("ENOENT"); },
     });
 
-    await expect(
-      service.generateBranchName({ provider: "claude" }, "Fix bug"),
-    ).rejects.toThrow("'claude' CLI not found");
+    const branch = await service.generateBranchName({ provider: "claude" }, "Fix bug");
+
+    expect(branch).toMatch(/^change-[0-9a-f]{8}$/);
   });
 
   it("throws on non-zero exit code", async () => {

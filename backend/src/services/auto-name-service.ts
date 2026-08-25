@@ -84,7 +84,13 @@ export class AutoNameService implements AutoNameGenerator {
         return fallback;
       }
       if (result.kind === "spawn_error") {
-        throw new Error(`'${cli}' CLI not found. Install it or check your PATH.`);
+        // The auto-name provider is a separate config knob (auto_name.provider in
+        // .webmux.yaml) from the agent the user actually selected for the session —
+        // its CLI being missing shouldn't block worktree creation. Same graceful
+        // fallback as a timeout, not a hard failure.
+        const fallback = generateFallbackBranchName();
+        log.warn(`[auto-name] '${cli}' CLI not found; using fallback branch ${fallback}`);
+        return fallback;
       }
       const stderr = result.stderr.trim();
       const stdout = result.stdout.trim();
