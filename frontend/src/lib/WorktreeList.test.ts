@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, within } from "@testing-library/svelte";
+import { tick } from "svelte";
 import { describe, expect, it, vi } from "vitest";
 import WorktreeList from "./WorktreeList.svelte";
 import type { WorktreeInfo, WorktreeListRow } from "./types";
@@ -76,6 +77,45 @@ describe("WorktreeList", () => {
 
     expect(onremove).toHaveBeenCalledWith("feature/list-actions");
     expect(onselect).not.toHaveBeenCalled();
+  });
+
+  it("opens the row actions menu on a long-press without selecting the row", async () => {
+    vi.useFakeTimers();
+    const onselect = vi.fn();
+
+    const { container } = render(WorktreeList, {
+      props: {
+        rows: [createRow(createWorktree("feature/long-press"))],
+        selected: null,
+        removing: new Set<string>(),
+        initializing: new Set<string>(),
+        archiving: new Set<string>(),
+        postingLinear: new Set<string>(),
+        notifiedBranches: new Set<string>(),
+        onselect,
+        onclose: vi.fn(),
+        onarchive: vi.fn(),
+        onmerge: vi.fn(),
+        oncreatesubworktree: vi.fn(),
+        onremove: vi.fn(),
+        oneditprofile: vi.fn(),
+      },
+    });
+
+    const li = container.querySelector('[data-branch="feature/long-press"]');
+    const row = li?.querySelector("button");
+    if (!row) throw new Error("row select button not found");
+    fireEvent.touchStart(row);
+    vi.advanceTimersByTime(500);
+    await tick();
+
+    expect(within(container).getByRole("button", { name: "Merge" })).toBeInTheDocument();
+    expect(onselect).not.toHaveBeenCalled();
+
+    // Close the menu so it doesn't leak into other tests sharing `screen` —
+    // this file doesn't call cleanup() between tests.
+    await fireEvent.click(document.body);
+    vi.useRealTimers();
   });
 
   it("disables row actions while a worktree is being removed", () => {

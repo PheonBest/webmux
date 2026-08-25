@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import type { WorktreeListRow } from "./types";
+  import { longpress } from "./actions";
   import PrBadge from "./PrBadge.svelte";
   import LinearBadge from "./LinearBadge.svelte";
   import AgentStatusIcon, { agentIconVisible } from "./AgentStatusIcon.svelte";
@@ -297,6 +298,7 @@
             openMenuBranch = null;
             onselect(wt.branch);
           }}
+          use:longpress={{ onLongPress: () => toggleMenu(wt.branch) }}
         >
           <span class="flex min-w-0 items-start gap-2 pr-5">
             {#if row.depth > 0}
