@@ -14,9 +14,11 @@ vi.mock("./api", () => ({
   updateAgent: vi.fn(),
   deleteAgent: vi.fn(),
   validateAgent: vi.fn(),
+  refreshVersionCheck: vi.fn(),
+  triggerUpdate: vi.fn(),
 }));
 
-import { api, createAgent, deleteAgent, fetchAgents, validateAgent } from "./api";
+import { api, createAgent, deleteAgent, fetchAgents, refreshVersionCheck, triggerUpdate, validateAgent } from "./api";
 
 const originalDialogShowModal = HTMLDialogElement.prototype.showModal;
 const originalDialogClose = HTMLDialogElement.prototype.close;
@@ -232,5 +234,43 @@ describe("SettingsDialog agent management", () => {
     await waitFor(() => {
       expect(onagentschange).toHaveBeenCalledWith([]);
     });
+  });
+
+  it("checks for updates and offers to update when commits are behind", async () => {
+    vi.mocked(fetchAgents).mockResolvedValue([]);
+    vi.mocked(refreshVersionCheck).mockResolvedValue({
+      currentCommit: "abc1234",
+      latestCommit: "def5678",
+      commitsBehind: 2,
+      updateAvailable: true,
+    });
+    vi.mocked(triggerUpdate).mockResolvedValue({ ok: true });
+
+    renderDialog();
+
+    await fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
+
+    expect(refreshVersionCheck).toHaveBeenCalledTimes(1);
+    await screen.findByText(/2 new commits on origin\/main/);
+
+    await fireEvent.click(screen.getByRole("button", { name: "Update now" }));
+    expect(triggerUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports up to date when there are no new commits", async () => {
+    vi.mocked(fetchAgents).mockResolvedValue([]);
+    vi.mocked(refreshVersionCheck).mockResolvedValue({
+      currentCommit: "abc1234",
+      latestCommit: null,
+      commitsBehind: 0,
+      updateAvailable: false,
+    });
+
+    renderDialog();
+
+    await fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
+
+    await screen.findByText("Up to date (abc1234).");
+    expect(screen.queryByRole("button", { name: "Update now" })).not.toBeInTheDocument();
   });
 });

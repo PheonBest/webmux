@@ -7,7 +7,7 @@
   import Toggle from "./Toggle.svelte";
   import ConfirmDialog from "./ConfirmDialog.svelte";
   import AgentEditorDialog from "./AgentEditorDialog.svelte";
-  import { api, createAgent, deleteAgent, fetchAgents, updateAgent, validateAgent } from "./api";
+  import { api, createAgent, deleteAgent, fetchAgents, refreshVersionCheck, triggerUpdate, updateAgent, validateAgent } from "./api";
   import type { AgentDetails, AgentSummary, UpsertCustomAgentRequest } from "./types";
   import { currentPushState, disablePushNotifications, enablePushNotifications, type PushPermissionState } from "./push-notifications";
 
@@ -119,6 +119,41 @@
       pushState = await currentPushState();
     } finally {
       pushBusy = false;
+    }
+  }
+
+  type UpdateCheckStatus = "idle" | "checking" | "up-to-date" | "available" | "error";
+  let updateCheckStatus = $state<UpdateCheckStatus>("idle");
+  let updateCheckMessage = $state<string | null>(null);
+
+  async function handleCheckForUpdates(): Promise<void> {
+    updateCheckStatus = "checking";
+    updateCheckMessage = null;
+    try {
+      const result = await refreshVersionCheck();
+      if (result.updateAvailable) {
+        updateCheckStatus = "available";
+        updateCheckMessage = `${result.commitsBehind} new commit${result.commitsBehind === 1 ? "" : "s"} on origin/main (${result.currentCommit} → ${result.latestCommit}).`;
+      } else if (result.currentCommit === null) {
+        updateCheckStatus = "error";
+        updateCheckMessage = "Not a git-linked install — nothing to compare against origin/main.";
+      } else {
+        updateCheckStatus = "up-to-date";
+        updateCheckMessage = `Up to date (${result.currentCommit}).`;
+      }
+    } catch (err) {
+      updateCheckStatus = "error";
+      updateCheckMessage = errorMessage(err);
+    }
+  }
+
+  async function handleUpdateNow(): Promise<void> {
+    updateCheckMessage = "Updating — the service will restart and reconnect shortly.";
+    try {
+      await triggerUpdate();
+    } catch (err) {
+      updateCheckStatus = "error";
+      updateCheckMessage = errorMessage(err);
     }
   }
 
@@ -366,6 +401,27 @@
           ontoggle={handlePushToggle}
           aria-label="Push notifications"
         />
+      </div>
+    </div>
+
+    <div class="mb-5">
+      <span class="block text-xs text-muted mb-2">Updates</span>
+      <div class="flex items-center justify-between gap-3 px-3 py-2 rounded-md border border-edge bg-surface">
+        <div class="min-w-0">
+          <span class="text-[13px] text-primary">Check for updates</span>
+          <p class="text-[11px] mt-0.5 {updateCheckStatus === 'error' ? 'text-danger' : 'text-muted'}">
+            {updateCheckMessage ?? "Compares this build against origin/main."}
+          </p>
+        </div>
+
+        <div class="flex shrink-0 items-center gap-2">
+          {#if updateCheckStatus === "available"}
+            <Btn small variant="cta" onclick={handleUpdateNow}>Update now</Btn>
+          {/if}
+          <Btn small onclick={handleCheckForUpdates} disabled={updateCheckStatus === "checking"}>
+            {updateCheckStatus === "checking" ? "Checking…" : "Check for updates"}
+          </Btn>
+        </div>
       </div>
     </div>
 

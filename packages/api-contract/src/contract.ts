@@ -110,6 +110,7 @@ export const apiPaths = {
   migrateProjects: "/api/projects/migrate",
   removeProject: "/api/projects/:prefix",
   fetchVersionCheck: "/api/version-check",
+  refreshVersionCheck: "/api/version-check/refresh",
   triggerUpdate: "/api/update",
   fetchPushPublicKey: "/api/push/public-key",
   subscribePush: "/api/push/subscribe",
@@ -562,6 +563,15 @@ export const apiContract = c.router({
   fetchVersionCheck: {
     method: "GET",
     path: apiPaths.fetchVersionCheck,
+    responses: {
+      200: VersionCheckResponseSchema,
+      500: ErrorResponseSchema,
+    },
+  },
+  refreshVersionCheck: {
+    method: "POST",
+    path: apiPaths.refreshVersionCheck,
+    body: c.noBody(),
     responses: {
       200: VersionCheckResponseSchema,
       500: ErrorResponseSchema,

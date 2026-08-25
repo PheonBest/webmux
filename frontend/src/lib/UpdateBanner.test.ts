@@ -18,38 +18,53 @@ describe("UpdateBanner", () => {
   afterEach(() => cleanup());
 
   it("shows nothing when no update is available", async () => {
-    vi.mocked(fetchVersionCheck).mockResolvedValue({ current: "0.43.1", latest: null, updateAvailable: false });
+    vi.mocked(fetchVersionCheck).mockResolvedValue({
+      currentCommit: "abc1234",
+      latestCommit: null,
+      commitsBehind: 0,
+      updateAvailable: false,
+    });
 
     render(UpdateBanner);
 
     await waitFor(() => expect(fetchVersionCheck).toHaveBeenCalled());
-    expect(screen.queryByText(/is available/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/new commit/)).not.toBeInTheDocument();
   });
 
   it("shows the banner and triggers an update on click", async () => {
-    vi.mocked(fetchVersionCheck).mockResolvedValue({ current: "0.43.1", latest: "0.44.0", updateAvailable: true });
+    vi.mocked(fetchVersionCheck).mockResolvedValue({
+      currentCommit: "abc1234",
+      latestCommit: "def5678",
+      commitsBehind: 3,
+      updateAvailable: true,
+    });
     vi.mocked(triggerUpdate).mockResolvedValue({ ok: true });
 
     render(UpdateBanner);
 
-    await screen.findByText("webmux v0.44.0 is available");
+    await screen.findByText("3 new commits on origin/main");
 
     await fireEvent.click(screen.getByRole("button", { name: "Update now" }));
 
     expect(triggerUpdate).toHaveBeenCalledTimes(1);
-    await screen.findByText(/Updating to v0.44.0/);
+    await screen.findByText(/Updating to def5678/);
   });
 
-  it("stays dismissed for the same version across reloads", async () => {
-    vi.mocked(fetchVersionCheck).mockResolvedValue({ current: "0.43.1", latest: "0.44.0", updateAvailable: true });
+  it("stays dismissed for the same commit across reloads", async () => {
+    vi.mocked(fetchVersionCheck).mockResolvedValue({
+      currentCommit: "abc1234",
+      latestCommit: "def5678",
+      commitsBehind: 1,
+      updateAvailable: true,
+    });
 
     const first = render(UpdateBanner);
-    await first.findByText("webmux v0.44.0 is available");
+    await first.findByText("1 new commit on origin/main");
     await fireEvent.click(first.getByLabelText("Dismiss"));
     cleanup();
 
     render(UpdateBanner);
     await waitFor(() => expect(fetchVersionCheck).toHaveBeenCalledTimes(2));
-    expect(screen.queryByText(/is available/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/new commit/)).not.toBeInTheDocument();
   });
 });

@@ -2,10 +2,11 @@
   import { onMount } from "svelte";
   import { fetchVersionCheck, triggerUpdate } from "./api";
 
-  const DISMISSED_VERSION_KEY = "webmux:update-banner-dismissed-version";
+  const DISMISSED_COMMIT_KEY = "webmux:update-banner-dismissed-commit";
 
-  let latest = $state<string | null>(null);
-  let current = $state<string | null>(null);
+  let latestCommit = $state<string | null>(null);
+  let currentCommit = $state<string | null>(null);
+  let commitsBehind = $state(0);
   let dismissed = $state(false);
   let updating = $state(false);
   let error = $state<string | null>(null);
@@ -17,19 +18,20 @@
   async function load(): Promise<void> {
     try {
       const result = await fetchVersionCheck();
-      current = result.current;
-      latest = result.updateAvailable ? result.latest : null;
-      dismissed = latest !== null && localStorage.getItem(DISMISSED_VERSION_KEY) === latest;
+      currentCommit = result.currentCommit;
+      commitsBehind = result.commitsBehind;
+      latestCommit = result.updateAvailable ? result.latestCommit : null;
+      dismissed = latestCommit !== null && localStorage.getItem(DISMISSED_COMMIT_KEY) === latestCommit;
     } catch {
-      latest = null;
+      latestCommit = null;
     }
   }
 
   function dismiss(): void {
     dismissed = true;
-    if (latest) {
+    if (latestCommit) {
       try {
-        localStorage.setItem(DISMISSED_VERSION_KEY, latest);
+        localStorage.setItem(DISMISSED_COMMIT_KEY, latestCommit);
       } catch { /* ignore storage errors */ }
     }
   }
@@ -46,15 +48,17 @@
   }
 </script>
 
-{#if latest && !dismissed}
+{#if latestCommit && !dismissed}
   <div class="flex items-start gap-3 px-4 py-2 text-[13px] bg-surface border-b border-edge text-primary">
     <div class="flex-1 min-w-0">
       {#if updating}
-        <span class="text-accent font-medium">Updating to v{latest}…</span>
+        <span class="text-accent font-medium">Updating to {latestCommit}…</span>
         <span class="text-muted">The service will restart and reconnect shortly.</span>
       {:else}
-        <span class="text-accent font-medium">webmux v{latest} is available</span>
-        <span class="text-muted">(current: v{current}).</span>
+        <span class="text-accent font-medium">
+          {commitsBehind} new commit{commitsBehind === 1 ? "" : "s"} on origin/main
+        </span>
+        <span class="text-muted">(current: {currentCommit}, latest: {latestCommit}).</span>
         <button type="button" class="text-accent hover:underline font-medium" onclick={update}>
           Update now
         </button>

@@ -286,6 +286,12 @@ export function fetchVersionCheck(): Promise<VersionCheckResponse> {
   return hubApi.fetchVersionCheck();
 }
 
+/** Bypasses the server's TTL cache for a fresh `git fetch` — the Settings
+ *  "Check for updates" button. */
+export function refreshVersionCheck(): Promise<VersionCheckResponse> {
+  return hubApi.refreshVersionCheck();
+}
+
 /** Triggers `webmux update` on the server (installs the latest version, then
  *  restarts every locally installed service). Fire-and-forget: the response
  *  comes back before the restart happens. */

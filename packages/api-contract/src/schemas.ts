@@ -648,10 +648,11 @@ export const PushUnsubscribeRequestSchema = z.object({
 });
 
 export const VersionCheckResponseSchema = z.object({
-  current: z.string(),
-  /** Latest version on the npm registry, or null when the check failed
-   *  (offline, registry unreachable) or hasn't run yet. */
-  latest: z.string().nullable(),
+  /** Short commit SHA the running server was built from, or null when this
+   *  isn't a git-linked dev install (no origin/main to compare against). */
+  currentCommit: z.string().nullable(),
+  latestCommit: z.string().nullable(),
+  commitsBehind: z.number(),
   updateAvailable: z.boolean(),
 });
 

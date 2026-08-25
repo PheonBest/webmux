@@ -144,15 +144,15 @@ import { createWebmuxRuntime, type WebmuxRuntime } from "./runtime";
 import { createInstanceRegistry, type InstanceEntry } from "./adapters/instance-registry";
 import { createProjectsRegistry } from "./adapters/projects-registry";
 import { ProjectManager, type ManagedProject, type ProjectLoopController } from "./services/project-manager";
-import { VersionCheckService, fetchLatestNpmVersion } from "./services/version-check-service";
+import { VersionCheckService } from "./services/version-check-service";
 import { PushSubscriptionStore, loadOrCreateVapidKeys, sendPushToAll, type VapidKeyPair } from "./services/push-service";
 import { buildWorkspaceDeepLink, sendDiscordAlert } from "./services/alert-delivery-service";
+import { resolveWebmuxGitRepoRoot } from "./adapters/webmux-paths";
 
 const PORT = parseInt(Bun.env.PORT || "5111", 10);
 const STATIC_DIR = Bun.env.WEBMUX_STATIC_DIR || "";
 const versionCheckService = new VersionCheckService({
-  currentVersion: pkg.version,
-  fetchLatest: () => fetchLatestNpmVersion("webmux"),
+  repoRoot: resolveWebmuxGitRepoRoot(),
 });
 const pushSubscriptionStore = new PushSubscriptionStore(join(homedir(), ".webmux", "push", "subscriptions.json"));
 let vapidKeysPromise: Promise<VapidKeyPair> | null = null;
@@ -2694,15 +2694,35 @@ async function apiFetchVersionCheck(): Promise<Response> {
   return jsonResponse(await versionCheckService.check());
 }
 
-/** Fire-and-forget: spawns `webmux update` (same flow as running it from a
- *  terminal — `bun install --global webmux@latest`, then restarts every
- *  locally installed service) and returns immediately, since the restart
- *  step will kill this very process once it completes. Output goes to
- *  `~/.webmux/update.log` for diagnosis if it fails silently. */
+/** Settings' "Check for updates" button — bypasses the TTL cache so the
+ *  click gets a fresh `git fetch` result instead of a possibly-stale one. */
+async function apiRefreshVersionCheck(): Promise<Response> {
+  versionCheckService.invalidate();
+  return jsonResponse(await versionCheckService.check());
+}
+
+/** Fire-and-forget: git-linked dev installs (this repo's own deployment
+ *  model — the global `webmux` binary symlinks into a git checkout, see
+ *  resolveWebmuxGitRepoRoot) update via `git pull` + rebuild + service
+ *  restart. A real npm/registry install has no origin/main to pull, so it
+ *  falls back to the existing `bun install --global webmux@latest` flow.
+ *  Either way this returns immediately, since the restart step kills this
+ *  very process once it completes. Output goes to `~/.webmux/update.log`. */
 function triggerSelfUpdate(): void {
+  const logPath = join(homedir(), ".webmux", "update.log");
+  const repoRoot = resolveWebmuxGitRepoRoot();
+
+  if (repoRoot) {
+    const proc = Bun.spawn(
+      ["bash", "-c", "git pull --ff-only && bun run build && webmux service restart"],
+      { cwd: repoRoot, stdin: "ignore", stdout: Bun.file(logPath), stderr: Bun.file(logPath) },
+    );
+    proc.unref();
+    return;
+  }
+
   const whichResult = Bun.spawnSync(["which", "webmux"], { stdout: "pipe", stderr: "pipe" });
   const webmuxPath = whichResult.success ? whichResult.stdout.toString().trim() : "webmux";
-  const logPath = join(homedir(), ".webmux", "update.log");
   const proc = Bun.spawn([webmuxPath, "update"], {
     stdin: "ignore",
     stdout: Bun.file(logPath),
@@ -2769,6 +2789,9 @@ function buildServeRoutes(): ProjectRoutes {
     },
     [apiPaths.fetchVersionCheck]: {
       GET: () => catchingRoute("GET /api/version-check", () => apiFetchVersionCheck()),
+    },
+    [apiPaths.refreshVersionCheck]: {
+      POST: () => catchingRoute("POST /api/version-check/refresh", () => apiRefreshVersionCheck()),
     },
     [apiPaths.triggerUpdate]: {
       POST: () => Promise.resolve(apiTriggerUpdate()),
