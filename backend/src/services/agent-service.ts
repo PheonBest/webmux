@@ -55,21 +55,25 @@ function buildBuiltInAgentInvocation(input: {
     const leadingPrompt = input.systemPrompt && input.launchMode !== "resume" && input.launchMode !== "fork"
       ? input.systemPrompt
       : undefined;
+    // Unlike claude/codex, opencode's default command takes a `project` path
+    // positional — `-- <text>` gets parsed as that path, not a message. The
+    // seed message goes through the documented `--prompt <string>` flag instead.
+    const opencodePromptFlag = (text: string | undefined): string => (text ? ` --prompt ${quoteShell(text)}` : "");
     if (input.launchMode === "fork" && input.forkFromSessionId) {
       // opencode's CLI has no documented session-fork flag (only a `/session/:id/fork`
       // HTTP endpoint) — best-effort fallback: resume the parent session directly.
-      return `${yoloPrefix}opencode --session ${quoteShell(input.forkFromSessionId)}${promptSuffix}`;
+      return `${yoloPrefix}opencode --session ${quoteShell(input.forkFromSessionId)}${opencodePromptFlag(input.prompt)}`;
     }
     if (input.launchMode === "resume") {
       const resumeTarget = input.resumeConversationId
         ? ` --session ${quoteShell(input.resumeConversationId)}`
         : " --continue";
-      return `${yoloPrefix}opencode${resumeTarget}${promptSuffix}`;
+      return `${yoloPrefix}opencode${resumeTarget}${opencodePromptFlag(input.prompt)}`;
     }
-    const combinedPromptSuffix = leadingPrompt
-      ? ` -- ${quoteShell(input.prompt ? `${leadingPrompt}\n\n${input.prompt}` : leadingPrompt)}`
-      : promptSuffix;
-    return `${yoloPrefix}opencode${combinedPromptSuffix}`;
+    const combinedPrompt = leadingPrompt
+      ? (input.prompt ? `${leadingPrompt}\n\n${input.prompt}` : leadingPrompt)
+      : input.prompt;
+    return `${yoloPrefix}opencode${opencodePromptFlag(combinedPrompt)}`;
   }
 
   if (input.agent === "codex") {

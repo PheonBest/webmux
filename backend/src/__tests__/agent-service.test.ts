@@ -195,8 +195,11 @@ describe("agent-service command builders", () => {
       prompt: "fix the tests",
     });
 
-    expect(command).toContain("opencode");
-    expect(command).toContain("fix the tests");
+    // opencode's default command takes a `project` path positional, so the seed
+    // message must go through `--prompt`, not a trailing `-- <text>` (which claude/
+    // codex use, but opencode would parse as the project path).
+    expect(command).toContain("opencode --prompt 'fix the tests'");
+    expect(command).not.toContain("-- 'fix the tests'");
     expect(command).not.toContain("--continue");
     expect(command).not.toContain("OPENCODE_PERMISSION");
   });
@@ -243,7 +246,23 @@ describe("agent-service command builders", () => {
       prompt: "keep going",
     });
 
-    expect(command).toContain("opencode --session 'ses_abc123' -- 'keep going'");
+    expect(command).toContain("opencode --session 'ses_abc123' --prompt 'keep going'");
+  });
+
+  it("forks opencode by resuming the parent session, prompt via --prompt", () => {
+    const command = buildAgentPaneCommand({
+      agent: builtInAgent("opencode"),
+      runtimeEnvPath: "/tmp/gitdir/webmux/runtime.env",
+      repoRoot: "/repo",
+      worktreePath: "/repo/__worktrees/feature",
+      branch: "feature",
+      profileName: "default",
+      launchMode: "fork",
+      forkFromSessionId: "ses_parent",
+      prompt: "explore an alternative",
+    });
+
+    expect(command).toContain("opencode --session 'ses_parent' --prompt 'explore an alternative'");
   });
 
   it("builds docker commands that exec inside the container", () => {
