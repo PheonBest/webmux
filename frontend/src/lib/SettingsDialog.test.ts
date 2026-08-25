@@ -64,6 +64,7 @@ function createConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     defaultProfileName: "default",
     defaultAgentId: "claude",
     autoName: false,
+    version: "0.43.1",
     linearCreateTicketOption: false,
     linearProjectUrl: null,
     startupEnvs: {},

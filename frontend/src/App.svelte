@@ -38,6 +38,7 @@
   import {
     SSH_STORAGE_KEY,
     makeCursorUrl,
+    makeVscodeUrl,
     errorMessage,
     worktreeCreationPhaseLabel,
     loadSavedTheme,
@@ -91,6 +92,7 @@
       defaultProfileName: "",
       defaultAgentId: "claude",
       autoName: false,
+      version: "",
       linearCreateTicketOption: false,
       linearProjectUrl: null,
       startupEnvs: {},
@@ -1426,6 +1428,7 @@
         <SidebarRepoRow
           label={config.mainBranch ?? "main"}
           cursorUrl={makeCursorUrl(config.projectDir, sshHost) ?? ""}
+          vscodeUrl={makeVscodeUrl(config.projectDir, sshHost) ?? ""}
           onpull={() => { pullMainConfirm = true; pullMainForce = false; pullMainError = ""; }}
         />
       {/if}
@@ -1433,9 +1436,13 @@
         <SidebarRepoRow
           label={lr.alias}
           cursorUrl={makeCursorUrl(lr.dir, sshHost) ?? ""}
+          vscodeUrl={makeVscodeUrl(lr.dir, sshHost) ?? ""}
           onpull={() => { pullLinkedRepoAlias = lr.alias; pullLinkedRepoForce = false; pullLinkedRepoError = ""; }}
         />
       {/each}
+      {#if config.version}
+        <div class="shrink-0 px-3 py-1 text-[10px] text-muted/70">webmux v{config.version}</div>
+      {/if}
       {#if showLinearPanel}
         <LinearPanel
           issues={linearIssues}
@@ -1759,6 +1766,7 @@
   <DiffDialogComponent
     branch={selectedBranch}
     cursorUrl={makeCursorUrl(selectedWorktree?.dir, sshHost)}
+    vscodeUrl={makeVscodeUrl(selectedWorktree?.dir, sshHost)}
     onclose={() => (showDiffDialog = false)}
   />
 {/if}

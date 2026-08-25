@@ -7,11 +7,12 @@
   import { errorMessage } from "./utils";
   import BaseDialog from "./BaseDialog.svelte";
   import Btn from "./Btn.svelte";
-  import CursorButton from "./CursorButton.svelte";
+  import IdeButton from "./IdeButton.svelte";
 
   let {
     branch,
     cursorUrl = null,
+    vscodeUrl = null,
     onclose,
   }: DiffDialogProps = $props();
 
@@ -70,7 +71,10 @@
   <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
     <h2 class="text-base">Changes &mdash; <span class="font-mono text-sm">{branch}</span></h2>
     {#if cursorUrl}
-      <CursorButton url={cursorUrl} />
+      <IdeButton label="Cursor" url={cursorUrl} />
+    {/if}
+    {#if vscodeUrl}
+      <IdeButton label="VS Code" url={vscodeUrl} />
     {/if}
   </div>
 

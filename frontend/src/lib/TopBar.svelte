@@ -9,7 +9,7 @@
   import RepoGroup from "./RepoGroup.svelte";
   import Btn from "./Btn.svelte";
   import NotificationItem from "./NotificationItem.svelte";
-  import { makeCursorUrl } from "./utils";
+  import { makeCursorUrl, makeVscodeUrl } from "./utils";
 
   let {
     name,
@@ -84,6 +84,7 @@
   }
 
   let cursorUrl = $derived(makeCursorUrl(worktree?.dir, sshHost));
+  let vscodeUrl = $derived(makeVscodeUrl(worktree?.dir, sshHost));
   let headerName = $derived(worktree?.label ?? name);
   let displayName = $derived(truncateWorktreeName(headerName, 30));
   let displayBranch = $derived(worktree?.label ? truncateWorktreeName(name, 44) : null);
@@ -101,9 +102,10 @@
         alias: lr.alias,
         dir: lr.dir,
         cursorUrl: makeCursorUrl(lr.dir && name ? `${lr.dir}/${name}` : null, sshHost),
+        vscodeUrl: makeVscodeUrl(lr.dir && name ? `${lr.dir}/${name}` : null, sshHost),
         prs: (worktree?.prs ?? []).filter((pr) => pr.repo === lr.alias),
       }))
-      .filter((g) => g.prs.length > 0 || g.cursorUrl),
+      .filter((g) => g.prs.length > 0 || g.cursorUrl || g.vscodeUrl),
   );
 
   let hasMoreContent = $derived(
@@ -196,6 +198,7 @@
             prs={mainPrs}
             services={worktree?.services ?? []}
             {cursorUrl}
+            {vscodeUrl}
             {onCiClick}
             {onReviewsClick}
           />
@@ -210,6 +213,7 @@
           label={group.alias}
           prs={group.prs}
           cursorUrl={group.cursorUrl}
+          vscodeUrl={group.vscodeUrl}
           {onCiClick}
           {onReviewsClick}
         />

@@ -607,6 +607,7 @@ export const LinkedRepoInfoSchema = z.object({
 
 export const AppConfigSchema = z.object({
   name: z.string(),
+  version: z.string(),
   services: z.array(ServiceConfigSchema),
   profiles: z.array(ProfileConfigSchema),
   agents: z.array(AgentSummarySchema),

@@ -417,6 +417,7 @@ const autoRemoveDeps: AutoRemoveDependencies = {
 
 function getFrontendConfig(): {
   name: string;
+  version: string;
   services: ProjectConfig["services"];
   profiles: Array<{ name: string; systemPrompt?: string }>;
   agents: ReturnType<typeof listAgentSummaries>;
@@ -442,6 +443,7 @@ function getFrontendConfig(): {
 
   return {
     name: config.name,
+    version: pkg.version,
     services: config.services,
     profiles: orderedProfileEntries.map(([name, profile]) => ({
       name,

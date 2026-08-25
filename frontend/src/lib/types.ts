@@ -105,6 +105,7 @@ export interface AskUserQuestionInput {
 export interface DiffDialogProps {
   branch: string;
   cursorUrl?: string | null;
+  vscodeUrl?: string | null;
   onclose: () => void;
 }
 
