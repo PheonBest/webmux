@@ -51,7 +51,15 @@
   let isDraggingOver = $state(false);
   let dragCounter = 0;
 
+  // Last text webmux tried to copy (from an OSC 52 sequence or an xterm.js
+  // selection). Tracked so the header's "Copy" button can retry the write
+  // from within a real click — the automatic write above often silently
+  // fails on a plain-HTTP origin, since it runs from an async WebSocket
+  // message handler rather than a user gesture (see copyLastSelectionToClipboard).
+  let lastSelectionText: string | null = null;
+
   function copyToClipboard(text: string): void {
+    lastSelectionText = text;
     if (navigator.clipboard?.writeText) {
       navigator.clipboard.writeText(text).catch(() => {});
       return;
@@ -69,6 +77,16 @@
 
   function scrollToBottom(): void {
     term?.scrollToBottom();
+  }
+
+  /** Retries copying the last OSC 52 / selection text to the clipboard from
+   *  within a real click, so it works even where the automatic copy above
+   *  silently failed (see lastSelectionText). Returns false when there's
+   *  nothing to copy yet. */
+  export function copyLastSelectionToClipboard(): boolean {
+    if (!lastSelectionText) return false;
+    copyToClipboard(lastSelectionText);
+    return true;
   }
 
   export function sendSelectPane(pane: number) {

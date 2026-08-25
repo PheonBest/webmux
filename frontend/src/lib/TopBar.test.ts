@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/svelte";
+import { fireEvent, render, screen } from "@testing-library/svelte";
 import { describe, expect, it, vi } from "vitest";
 import TopBar from "./TopBar.svelte";
 import type { WorktreeInfo } from "./types";
@@ -41,6 +41,7 @@ function createWorktree(
 function renderTopBar(
   branch: string,
   overrides: Partial<WorktreeInfo> = {},
+  props: Partial<{ oncopyterminal: () => void }> = {},
 ): ReturnType<typeof render> {
   return render(TopBar, {
     props: {
@@ -57,11 +58,26 @@ function renderTopBar(
       onsettings: vi.fn(),
       onCiClick: vi.fn(),
       onReviewsClick: vi.fn(),
+      ...props,
     },
   });
 }
 
 describe("TopBar", () => {
+  it("hides the copy-terminal button when oncopyterminal is not provided", () => {
+    renderTopBar("feature/no-copy");
+    expect(screen.queryByTitle("Copy last terminal selection to clipboard")).not.toBeInTheDocument();
+  });
+
+  it("invokes oncopyterminal when the copy-terminal button is clicked", async () => {
+    const oncopyterminal = vi.fn();
+    renderTopBar("feature/copy", {}, { oncopyterminal });
+
+    await fireEvent.click(screen.getByTitle("Copy last terminal selection to clipboard"));
+
+    expect(oncopyterminal).toHaveBeenCalledTimes(1);
+  });
+
   it("truncates worktree names longer than 30 characters in the header", () => {
     const branch = "feature/abcdefghijklmnopqrstuvwxyz-1234567890";
 

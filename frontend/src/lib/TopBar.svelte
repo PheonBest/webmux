@@ -24,6 +24,7 @@
     onarchive,
     onmerge,
     onremove,
+    oncopyterminal,
     oneditlabel,
     onsettings,
     onCiClick,
@@ -45,6 +46,7 @@
     onarchive: () => void;
     onmerge: () => void;
     onremove: () => void;
+    oncopyterminal?: () => void;
     oneditlabel?: () => void;
     onsettings: () => void;
     onCiClick: (pr: PrEntry) => void;
@@ -349,6 +351,21 @@
         </div>
       {/if}
     </div>
+
+    {#if oncopyterminal}
+      <button
+        type="button"
+        class="p-1.5 rounded-md cursor-pointer bg-transparent border border-transparent text-muted hover:text-primary hover:border-edge"
+        title="Copy last terminal selection to clipboard"
+        aria-label="Copy last terminal selection to clipboard"
+        onclick={oncopyterminal}
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+        </svg>
+      </button>
+    {/if}
 
     <button
       type="button"

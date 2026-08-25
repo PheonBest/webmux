@@ -419,8 +419,17 @@
   let terminalRef:
     | {
         sendSelectPane: (pane: number) => void;
+        copyLastSelectionToClipboard: () => boolean;
       }
     | undefined = $state();
+
+  function copyLastTerminalSelection(): void {
+    const copied = terminalRef?.copyLastSelectionToClipboard() ?? false;
+    showToast({
+      tone: copied ? "success" : "error",
+      message: copied ? "Copied to clipboard" : "Nothing copied from the terminal yet",
+    });
+  }
 
   let openingBranches = $state<Set<string>>(new Set());
   let archivingBranches = $state<Set<string>>(new Set());
@@ -1488,6 +1497,7 @@
       onremove={() => {
         if (selectedBranch) removeBranch = selectedBranch;
       }}
+      oncopyterminal={copyLastTerminalSelection}
       oneditlabel={openLabelDialog}
       onsettings={() => (showSettingsDialog = true)}
       ondirtyclick={openDiffDialog}

@@ -211,6 +211,33 @@ describe("Terminal reconnect", () => {
     expect(terminal.options.theme).toBe(nextTheme);
   });
 
+  it("retries copying the last OSC 52 selection to the clipboard on demand", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+
+    const rendered = render(Terminal, {
+      props: { worktree: "feature/clipboard", terminalTheme: getTheme("github-dark").terminal },
+    });
+
+    // Nothing copied yet.
+    expect(rendered.component.copyLastSelectionToClipboard()).toBe(false);
+
+    const terminal = MockTerminal.instances[0]!;
+    const calls = terminal.parser.registerOscHandler.mock.calls as unknown as Array<
+      [number, (data: string) => boolean]
+    >;
+    const oscHandler = calls.find(([code]) => code === 52)?.[1];
+    if (!oscHandler) throw new Error("OSC 52 handler was not registered");
+    // "0;<base64>" is tmux's OSC 52 payload shape (selection "0" == clipboard).
+    oscHandler(`0;${btoa("copied text")}`);
+    writeText.mockClear();
+
+    expect(rendered.component.copyLastSelectionToClipboard()).toBe(true);
+    expect(writeText).toHaveBeenCalledWith("copied text");
+
+    vi.unstubAllGlobals();
+  });
+
   it("renders stale terminal refresh controls inside the terminal surface", async () => {
     const onrefreshagentterminal = vi.fn();
     render(Terminal, {
