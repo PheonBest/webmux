@@ -131,7 +131,13 @@ export class ReconciliationService {
     private readonly deps: ReconciliationServiceDependencies,
     options: ReconciliationServiceOptions = {},
   ) {
-    this.freshnessMs = options.freshnessMs ?? 500;
+    // Above the frontend's 5s default poll interval (App.svelte's
+    // DEFAULT_POLL_INTERVAL_MS) so routine polling skips every other
+    // reconcile instead of paying its full git-subprocess cost on every hit —
+    // reconcile is comparatively expensive on slow filesystems (e.g. WSL2
+    // DrvFs / `/mnt/*` mounts), and action handlers that need up-to-date
+    // state already pass `force: true` to bypass this window.
+    this.freshnessMs = options.freshnessMs ?? 6000;
     this.now = options.now ?? Date.now;
     this.concurrency = options.concurrency ?? 4;
   }
