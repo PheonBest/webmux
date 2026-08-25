@@ -630,6 +630,14 @@ export const AppConfigSchema = z.object({
   groupMultiAgentSingleWorkflow: z.boolean().default(true),
 });
 
+export const VersionCheckResponseSchema = z.object({
+  current: z.string(),
+  /** Latest version on the npm registry, or null when the check failed
+   *  (offline, registry unreachable) or hasn't run yet. */
+  latest: z.string().nullable(),
+  updateAvailable: z.boolean(),
+});
+
 export const CiLogsResponseSchema = z.object({
   logs: z.string(),
 });
@@ -836,6 +844,7 @@ export type ServiceConfig = z.infer<typeof ServiceConfigSchema>;
 export type ProfileConfig = z.infer<typeof ProfileConfigSchema>;
 export type LinkedRepoInfo = z.infer<typeof LinkedRepoInfoSchema>;
 export type AppConfig = z.infer<typeof AppConfigSchema>;
+export type VersionCheckResponse = z.infer<typeof VersionCheckResponseSchema>;
 export type CiLogsResponse = z.infer<typeof CiLogsResponseSchema>;
 export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;
 export type OkResponse = z.infer<typeof OkResponseSchema>;

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
 import type { BunRequest, Server, ServerWebSocket, WebSocketHandler } from "bun";
-import { networkInterfaces } from "node:os";
+import { networkInterfaces, homedir } from "node:os";
 import pkg from "../../package.json";
 import {
   AgentIdParamsSchema,
@@ -142,9 +142,14 @@ import { createWebmuxRuntime, type WebmuxRuntime } from "./runtime";
 import { createInstanceRegistry, type InstanceEntry } from "./adapters/instance-registry";
 import { createProjectsRegistry } from "./adapters/projects-registry";
 import { ProjectManager, type ManagedProject, type ProjectLoopController } from "./services/project-manager";
+import { VersionCheckService, fetchLatestNpmVersion } from "./services/version-check-service";
 
 const PORT = parseInt(Bun.env.PORT || "5111", 10);
 const STATIC_DIR = Bun.env.WEBMUX_STATIC_DIR || "";
+const versionCheckService = new VersionCheckService({
+  currentVersion: pkg.version,
+  fetchLatest: () => fetchLatestNpmVersion("webmux"),
+});
 /** Strict check: is `dir` itself inside a git work tree? Unlike
  *  git.resolveRepoRoot it never scans child directories, so a non-repo path is
  *  rejected rather than silently resolving to an unrelated nested repo. */
@@ -2643,6 +2648,32 @@ async function apiRemoveProject(prefix: string): Promise<Response> {
  *  sensor). One multi-project server per machine is the goal, so any peer here
  *  is a leftover single-project instance the user should fold in with `webmux
  *  project migrate`. The frontend reads this to show a migration banner. */
+async function apiFetchVersionCheck(): Promise<Response> {
+  return jsonResponse(await versionCheckService.check());
+}
+
+/** Fire-and-forget: spawns `webmux update` (same flow as running it from a
+ *  terminal — `bun install --global webmux@latest`, then restarts every
+ *  locally installed service) and returns immediately, since the restart
+ *  step will kill this very process once it completes. Output goes to
+ *  `~/.webmux/update.log` for diagnosis if it fails silently. */
+function triggerSelfUpdate(): void {
+  const whichResult = Bun.spawnSync(["which", "webmux"], { stdout: "pipe", stderr: "pipe" });
+  const webmuxPath = whichResult.success ? whichResult.stdout.toString().trim() : "webmux";
+  const logPath = join(homedir(), ".webmux", "update.log");
+  const proc = Bun.spawn([webmuxPath, "update"], {
+    stdin: "ignore",
+    stdout: Bun.file(logPath),
+    stderr: Bun.file(logPath),
+  });
+  proc.unref();
+}
+
+function apiTriggerUpdate(): Response {
+  triggerSelfUpdate();
+  return jsonResponse({ ok: true }, 202);
+}
+
 function apiListInstances(): Response {
   return jsonResponse({
     instances: instanceRegistry.listLive()
@@ -2674,6 +2705,12 @@ function buildServeRoutes(): ProjectRoutes {
     },
     [apiPaths.fetchInstances]: {
       GET: () => apiListInstances(),
+    },
+    [apiPaths.fetchVersionCheck]: {
+      GET: () => catchingRoute("GET /api/version-check", () => apiFetchVersionCheck()),
+    },
+    [apiPaths.triggerUpdate]: {
+      POST: () => Promise.resolve(apiTriggerUpdate()),
     },
   };
   for (const app of apps.values()) {

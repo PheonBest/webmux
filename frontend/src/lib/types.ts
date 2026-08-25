@@ -69,6 +69,7 @@ export type {
   SetWorktreeLabelRequest,
   SetWorktreeLabelResponse,
   UnpushedCommit,
+  VersionCheckResponse,
   WorktreeCreationPhase,
   WorktreeCreationState,
   WorktreeCreateMode,

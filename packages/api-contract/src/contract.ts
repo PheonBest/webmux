@@ -54,6 +54,7 @@ import {
   ProjectPrefixParamsSchema,
   MigrateProjectsRequestSchema,
   MigrateProjectsResponseSchema,
+  VersionCheckResponseSchema,
 } from "./schemas";
 
 const c = initContract();
@@ -105,6 +106,8 @@ export const apiPaths = {
   projectInits: "/api/projects/init",
   migrateProjects: "/api/projects/migrate",
   removeProject: "/api/projects/:prefix",
+  fetchVersionCheck: "/api/version-check",
+  triggerUpdate: "/api/update",
 } as const;
 
 const commonErrorResponses = {
@@ -547,6 +550,23 @@ export const apiContract = c.router({
     responses: {
       200: OkResponseSchema,
       404: ErrorResponseSchema,
+      500: ErrorResponseSchema,
+    },
+  },
+  fetchVersionCheck: {
+    method: "GET",
+    path: apiPaths.fetchVersionCheck,
+    responses: {
+      200: VersionCheckResponseSchema,
+      500: ErrorResponseSchema,
+    },
+  },
+  triggerUpdate: {
+    method: "POST",
+    path: apiPaths.triggerUpdate,
+    body: c.noBody(),
+    responses: {
+      202: OkResponseSchema,
       500: ErrorResponseSchema,
     },
   },

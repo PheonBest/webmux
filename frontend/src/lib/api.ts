@@ -19,6 +19,7 @@ import type {
   RecoverDirectSwitchResponse,
   UpsertCustomAgentRequest,
   ValidateCustomAgentResponse,
+  VersionCheckResponse,
   WorktreeInfo,
   WorktreeTab,
 } from "./types";
@@ -276,6 +277,18 @@ export async function fetchInstances(): Promise<InstanceSummary[]> {
 export async function fetchProjects(): Promise<ProjectSummary[]> {
   const response = await hubApi.fetchProjects();
   return response.projects;
+}
+
+/** Checks the npm registry for a newer webmux version — drives the update banner. */
+export function fetchVersionCheck(): Promise<VersionCheckResponse> {
+  return hubApi.fetchVersionCheck();
+}
+
+/** Triggers `webmux update` on the server (installs the latest version, then
+ *  restarts every locally installed service). Fire-and-forget: the response
+ *  comes back before the restart happens. */
+export function triggerUpdate(): Promise<{ ok: true }> {
+  return hubApi.triggerUpdate();
 }
 
 function delay(ms: number): Promise<void> {
