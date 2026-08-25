@@ -630,6 +630,22 @@ export const AppConfigSchema = z.object({
   groupMultiAgentSingleWorkflow: z.boolean().default(true),
 });
 
+export const PushPublicKeyResponseSchema = z.object({
+  publicKey: z.string(),
+});
+
+export const PushSubscribeRequestSchema = z.object({
+  endpoint: z.string(),
+  keys: z.object({
+    p256dh: z.string(),
+    auth: z.string(),
+  }),
+});
+
+export const PushUnsubscribeRequestSchema = z.object({
+  endpoint: z.string(),
+});
+
 export const VersionCheckResponseSchema = z.object({
   current: z.string(),
   /** Latest version on the npm registry, or null when the check failed
@@ -845,6 +861,9 @@ export type ProfileConfig = z.infer<typeof ProfileConfigSchema>;
 export type LinkedRepoInfo = z.infer<typeof LinkedRepoInfoSchema>;
 export type AppConfig = z.infer<typeof AppConfigSchema>;
 export type VersionCheckResponse = z.infer<typeof VersionCheckResponseSchema>;
+export type PushPublicKeyResponse = z.infer<typeof PushPublicKeyResponseSchema>;
+export type PushSubscribeRequest = z.infer<typeof PushSubscribeRequestSchema>;
+export type PushUnsubscribeRequest = z.infer<typeof PushUnsubscribeRequestSchema>;
 export type CiLogsResponse = z.infer<typeof CiLogsResponseSchema>;
 export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;
 export type OkResponse = z.infer<typeof OkResponseSchema>;

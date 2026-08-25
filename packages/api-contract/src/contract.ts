@@ -55,6 +55,9 @@ import {
   MigrateProjectsRequestSchema,
   MigrateProjectsResponseSchema,
   VersionCheckResponseSchema,
+  PushPublicKeyResponseSchema,
+  PushSubscribeRequestSchema,
+  PushUnsubscribeRequestSchema,
 } from "./schemas";
 
 const c = initContract();
@@ -108,6 +111,9 @@ export const apiPaths = {
   removeProject: "/api/projects/:prefix",
   fetchVersionCheck: "/api/version-check",
   triggerUpdate: "/api/update",
+  fetchPushPublicKey: "/api/push/public-key",
+  subscribePush: "/api/push/subscribe",
+  unsubscribePush: "/api/push/unsubscribe",
 } as const;
 
 const commonErrorResponses = {
@@ -567,6 +573,34 @@ export const apiContract = c.router({
     body: c.noBody(),
     responses: {
       202: OkResponseSchema,
+      500: ErrorResponseSchema,
+    },
+  },
+  fetchPushPublicKey: {
+    method: "GET",
+    path: apiPaths.fetchPushPublicKey,
+    responses: {
+      200: PushPublicKeyResponseSchema,
+      500: ErrorResponseSchema,
+    },
+  },
+  subscribePush: {
+    method: "POST",
+    path: apiPaths.subscribePush,
+    body: PushSubscribeRequestSchema,
+    responses: {
+      200: OkResponseSchema,
+      400: ErrorResponseSchema,
+      500: ErrorResponseSchema,
+    },
+  },
+  unsubscribePush: {
+    method: "POST",
+    path: apiPaths.unsubscribePush,
+    body: PushUnsubscribeRequestSchema,
+    responses: {
+      200: OkResponseSchema,
+      400: ErrorResponseSchema,
       500: ErrorResponseSchema,
     },
   },

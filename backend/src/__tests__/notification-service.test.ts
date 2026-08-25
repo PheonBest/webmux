@@ -78,4 +78,30 @@ describe("NotificationService", () => {
 
     await reader.cancel();
   });
+
+  it("invokes onNotify listeners for every notify(), and stops after unsubscribe", () => {
+    const notifications = new NotificationService();
+    const received: string[] = [];
+    const unsubscribe = notifications.onNotify((n) => received.push(n.message));
+
+    notifications.recordEvent({ worktreeId: "wt_a", branch: "feature/a", type: "agent_stopped" });
+    unsubscribe();
+    notifications.recordEvent({ worktreeId: "wt_b", branch: "feature/b", type: "agent_stopped" });
+
+    expect(received).toEqual(["Agent stopped on feature/a"]);
+  });
+
+  it("does not let a throwing listener break notify() or other listeners", () => {
+    const notifications = new NotificationService();
+    const received: string[] = [];
+    notifications.onNotify(() => {
+      throw new Error("boom");
+    });
+    notifications.onNotify((n) => received.push(n.message));
+
+    const result = notifications.recordEvent({ worktreeId: "wt_a", branch: "feature/a", type: "agent_stopped" });
+
+    expect(result?.type).toBe("agent_stopped");
+    expect(received).toEqual(["Agent stopped on feature/a"]);
+  });
 });

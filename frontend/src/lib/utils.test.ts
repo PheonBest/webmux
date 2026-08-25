@@ -1,10 +1,12 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PrEntry } from "./types";
 import {
   LAST_SELECTED_WORKTREE_STORAGE_KEY,
   WEB_CHAT_UI_STORAGE_KEY,
+  clearWorkspaceQueryParam,
   loadSavedSelectedWorktree,
   loadUseWebChatUi,
+  readWorkspaceQueryParam,
   resolveSelectedBranch,
   prBadgeClass,
   prStateTextClass,
@@ -70,6 +72,28 @@ describe("worktree selection persistence", () => {
 
     expect(loadUseWebChatUi()).toBe(false);
     expect(localStorage.getItem(WEB_CHAT_UI_STORAGE_KEY)).toBeNull();
+  });
+});
+
+describe("workspace deep-link query param", () => {
+  afterEach(() => {
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("reads the workspace param from the URL", () => {
+    window.history.replaceState(null, "", "/?workspace=feature%2Fx");
+    expect(readWorkspaceQueryParam()).toBe("feature/x");
+  });
+
+  it("returns null when there's no workspace param", () => {
+    window.history.replaceState(null, "", "/?other=1");
+    expect(readWorkspaceQueryParam()).toBeNull();
+  });
+
+  it("strips the workspace param but keeps other query params", () => {
+    window.history.replaceState(null, "", "/?workspace=feature%2Fx&other=1");
+    clearWorkspaceQueryParam();
+    expect(window.location.search).toBe("?other=1");
   });
 });
 

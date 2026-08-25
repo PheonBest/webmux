@@ -9,6 +9,7 @@
   import AgentEditorDialog from "./AgentEditorDialog.svelte";
   import { api, createAgent, deleteAgent, fetchAgents, updateAgent, validateAgent } from "./api";
   import type { AgentDetails, AgentSummary, UpsertCustomAgentRequest } from "./types";
+  import { currentPushState, disablePushNotifications, enablePushNotifications, type PushPermissionState } from "./push-notifications";
 
   interface AgentEditorState {
     mode: "create" | "edit";
@@ -91,6 +92,35 @@
     agentsLoaded = true;
     void loadAgentList();
   });
+
+  let pushState = $state<PushPermissionState>("default");
+  let pushBusy = $state(false);
+  let pushError = $state<string | null>(null);
+  let pushStateLoaded = false;
+
+  $effect(() => {
+    if (pushStateLoaded) return;
+    pushStateLoaded = true;
+    void currentPushState().then((state) => (pushState = state));
+  });
+
+  async function handlePushToggle(enabled: boolean): Promise<void> {
+    pushBusy = true;
+    pushError = null;
+    try {
+      if (enabled) {
+        await enablePushNotifications();
+      } else {
+        await disablePushNotifications();
+      }
+      pushState = await currentPushState();
+    } catch (err) {
+      pushError = errorMessage(err);
+      pushState = await currentPushState();
+    } finally {
+      pushBusy = false;
+    }
+  }
 
   function handleAutoCreateToggle(enabled: boolean) {
     pendingAutoCreate = enabled;
@@ -308,6 +338,34 @@
             </div>
           {/if}
         {/if}
+      </div>
+    </div>
+
+    <div class="mb-5">
+      <span class="block text-xs text-muted mb-2">Notifications</span>
+      <div class="flex items-center justify-between gap-3 px-3 py-2 rounded-md border border-edge bg-surface">
+        <div>
+          <span class="text-[13px] text-primary">Push notifications</span>
+          <p class="text-[11px] text-muted mt-0.5">
+            {#if pushState === "unsupported"}
+              Not supported in this browser.
+            {:else if pushState === "denied"}
+              Blocked — allow notifications for this site in your browser settings.
+            {:else}
+              Get notified on this device when an agent stops, opens a PR, or hits an error.
+            {/if}
+          </p>
+          {#if pushError}
+            <p class="text-[11px] text-danger mt-0.5">{pushError}</p>
+          {/if}
+        </div>
+
+        <Toggle
+          checked={pushState === "subscribed"}
+          disabled={pushBusy || pushState === "unsupported" || pushState === "denied"}
+          ontoggle={handlePushToggle}
+          aria-label="Push notifications"
+        />
       </div>
     </div>
 

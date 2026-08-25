@@ -13,6 +13,8 @@ import {
   NotificationIdParamsSchema,
   type OneshotConfig,
   OpenWorktreeRequestSchema,
+  PushSubscribeRequestSchema,
+  PushUnsubscribeRequestSchema,
   RecoverDirectSwitchRequestSchema,
   PostWorktreeToLinearRequestSchema,
   type PostWorktreeToLinearTarget,
@@ -143,6 +145,8 @@ import { createInstanceRegistry, type InstanceEntry } from "./adapters/instance-
 import { createProjectsRegistry } from "./adapters/projects-registry";
 import { ProjectManager, type ManagedProject, type ProjectLoopController } from "./services/project-manager";
 import { VersionCheckService, fetchLatestNpmVersion } from "./services/version-check-service";
+import { PushSubscriptionStore, loadOrCreateVapidKeys, sendPushToAll, type VapidKeyPair } from "./services/push-service";
+import { buildWorkspaceDeepLink, sendDiscordAlert } from "./services/alert-delivery-service";
 
 const PORT = parseInt(Bun.env.PORT || "5111", 10);
 const STATIC_DIR = Bun.env.WEBMUX_STATIC_DIR || "";
@@ -150,6 +154,12 @@ const versionCheckService = new VersionCheckService({
   currentVersion: pkg.version,
   fetchLatest: () => fetchLatestNpmVersion("webmux"),
 });
+const pushSubscriptionStore = new PushSubscriptionStore(join(homedir(), ".webmux", "push", "subscriptions.json"));
+let vapidKeysPromise: Promise<VapidKeyPair> | null = null;
+function getVapidKeys(): Promise<VapidKeyPair> {
+  vapidKeysPromise ??= loadOrCreateVapidKeys(join(homedir(), ".webmux", "push", "vapid-keys.json"));
+  return vapidKeysPromise;
+}
 /** Strict check: is `dir` itself inside a git work tree? Unlike
  *  git.resolveRepoRoot it never scans child directories, so a non-repo path is
  *  rejected rather than silently resolving to an unrelated nested repo. */
@@ -222,6 +232,36 @@ const tmux = runtime.tmux;
 const projectRuntime = runtime.projectRuntime;
 const worktreeCreationTracker = runtime.worktreeCreationTracker;
 const runtimeNotifications = runtime.runtimeNotifications;
+runtimeNotifications.onNotify((notification) => {
+  void deliverAlert(notification);
+});
+
+/** Delivers a runtime notification (e.g. "Agent stopped on feature/x") over
+ *  push (always attempted — a no-op when no subscriptions exist) and Discord
+ *  (only when DISCORD_WEBHOOK_URL is set — off by default). Both failures are
+ *  swallowed inside their own helpers so a delivery problem never surfaces to
+ *  the caller of notify(). */
+async function deliverAlert(notification: { branch: string; message: string }): Promise<void> {
+  const url = buildWorkspaceDeepLink({ externalUrl: Bun.env.EXTERNAL_URL, prefix: instancePrefix, branch: notification.branch });
+
+  const subscriptions = await pushSubscriptionStore.list();
+  if (subscriptions.length > 0) {
+    const vapid = await getVapidKeys();
+    const subject = Bun.env.VAPID_SUBJECT?.trim() || "mailto:webmux@localhost";
+    const { expiredEndpoints } = await sendPushToAll(
+      subscriptions,
+      { title: config.name, body: notification.message, ...(url ? { url } : {}) },
+      vapid,
+      subject,
+    );
+    if (expiredEndpoints.length > 0) await pushSubscriptionStore.remove(expiredEndpoints);
+  }
+
+  const discordWebhookUrl = Bun.env.DISCORD_WEBHOOK_URL?.trim();
+  if (discordWebhookUrl) {
+    await sendDiscordAlert(discordWebhookUrl, { projectName: config.name, message: notification.message, url });
+  }
+}
 const reconciliationService = runtime.reconciliationService;
 const codexAppServerClient = new CodexAppServerClient({
   clientName: "webmux-agents",
@@ -2674,6 +2714,25 @@ function apiTriggerUpdate(): Response {
   return jsonResponse({ ok: true }, 202);
 }
 
+async function apiFetchPushPublicKey(): Promise<Response> {
+  const keys = await getVapidKeys();
+  return jsonResponse({ publicKey: keys.publicKey });
+}
+
+async function apiSubscribePush(req: Request): Promise<Response> {
+  const parsed = await parseJsonBody(req, PushSubscribeRequestSchema);
+  if (!parsed.ok) return parsed.response;
+  await pushSubscriptionStore.add(parsed.data);
+  return jsonResponse({ ok: true });
+}
+
+async function apiUnsubscribePush(req: Request): Promise<Response> {
+  const parsed = await parseJsonBody(req, PushUnsubscribeRequestSchema);
+  if (!parsed.ok) return parsed.response;
+  await pushSubscriptionStore.remove([parsed.data.endpoint]);
+  return jsonResponse({ ok: true });
+}
+
 function apiListInstances(): Response {
   return jsonResponse({
     instances: instanceRegistry.listLive()
@@ -2711,6 +2770,15 @@ function buildServeRoutes(): ProjectRoutes {
     },
     [apiPaths.triggerUpdate]: {
       POST: () => Promise.resolve(apiTriggerUpdate()),
+    },
+    [apiPaths.fetchPushPublicKey]: {
+      GET: () => catchingRoute("GET /api/push/public-key", () => apiFetchPushPublicKey()),
+    },
+    [apiPaths.subscribePush]: {
+      POST: (req) => catchingRoute("POST /api/push/subscribe", () => apiSubscribePush(req)),
+    },
+    [apiPaths.unsubscribePush]: {
+      POST: (req) => catchingRoute("POST /api/push/unsubscribe", () => apiUnsubscribePush(req)),
     },
   };
   for (const app of apps.values()) {

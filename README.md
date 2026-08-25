@@ -71,6 +71,23 @@ Your assigned issues appear in the dashboard once the service restarts.
 echo 'LINEAR_PROJECT_URL=https://linear.app/your-team/project/your-project' >> ~/.config/webmux/.env
 ```
 
+### Alerts (push notifications + optional Discord)
+
+Enable push notifications for yourself under Settings → Notifications — no server config needed, it registers your browser directly. This works even when the tab is closed, including on Android via an installed/pinned PWA.
+
+For the notification (and an optional Discord message) to link back to the right workspace, set `EXTERNAL_URL` to the address you access webmux at:
+
+```bash
+echo 'EXTERNAL_URL=http://100.81.194.124:5111' >> ~/.config/webmux/.env
+```
+
+**Optional — Discord.** Off by default; set `DISCORD_WEBHOOK_URL` to also post alerts to a Discord channel:
+
+```bash
+echo 'DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...' >> ~/.config/webmux/.env
+webmux service restart
+```
+
 ## Quick Start
 
 ```bash

@@ -25,7 +25,16 @@ function eventToNotificationInput(event: RuntimeEvent): { branch: string; type: 
 export class NotificationService {
   private readonly notifications: RuntimeNotification[] = [];
   private readonly sseClients = new Set<ReadableStreamDefaultController<Uint8Array>>();
+  private readonly listeners = new Set<(notification: RuntimeNotification) => void>();
   private nextId = 1;
+
+  /** Registers an external listener invoked whenever `notify()` fires — used
+   *  to deliver alerts (push, Discord) outside the SSE stream/in-app history.
+   *  Returns an unsubscribe function. */
+  onNotify(listener: (notification: RuntimeNotification) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
 
   constructor(private readonly maxItems = 50) {}
 
@@ -56,6 +65,11 @@ export class NotificationService {
       this.notifications.shift();
     }
     this.broadcast("notification", notification);
+    for (const listener of this.listeners) {
+      try {
+        listener(notification);
+      } catch { /* a listener's own errors must not break notify() for others */ }
+    }
     return notification;
   }
 

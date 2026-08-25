@@ -82,6 +82,24 @@ export function loadSavedSelectedWorktree(): string | null {
   return stored ? stored : null;
 }
 
+/** Reads `?workspace=<branch>` from the current URL — the deep-link param a
+ *  push notification or Discord alert points to (see buildWorkspaceDeepLink
+ *  on the backend). Takes priority over the locally saved selection so a
+ *  notification link always lands on the workspace it names. */
+export function readWorkspaceQueryParam(): string | null {
+  const value = new URLSearchParams(window.location.search).get("workspace")?.trim();
+  return value ? value : null;
+}
+
+/** Strips `?workspace=...` from the URL after it's been applied, so a reload
+ *  or later navigation doesn't keep forcing the same selection. */
+export function clearWorkspaceQueryParam(): void {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has("workspace")) return;
+  url.searchParams.delete("workspace");
+  window.history.replaceState(null, "", url.toString());
+}
+
 export function saveSelectedWorktree(branch: string | null): void {
   if (branch) {
     localStorage.setItem(LAST_SELECTED_WORKTREE_STORAGE_KEY, branch);

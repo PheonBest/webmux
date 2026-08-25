@@ -42,6 +42,8 @@
     worktreeCreationPhaseLabel,
     loadSavedTheme,
     loadSavedSelectedWorktree,
+    readWorkspaceQueryParam,
+    clearWorkspaceQueryParam,
     saveSelectedWorktree,
     resolveSelectedBranch,
     applyTheme,
@@ -109,7 +111,7 @@
 
   let config = $state<AppConfig>(createDefaultConfig());
   let worktrees = $state<WorktreeInfo[]>([]);
-  let selectedBranch = $state<string | null>(loadSavedSelectedWorktree());
+  let selectedBranch = $state<string | null>(readWorkspaceQueryParam() ?? loadSavedSelectedWorktree());
   let hasLoadedWorktrees = $state(false);
   let serverUnreachable = $state(false);
   let removeBranch = $state<string | null>(null);
@@ -1232,6 +1234,7 @@
 
   onMount(() => {
     applyTheme(currentTheme);
+    clearWorkspaceQueryParam();
     void ensureConfigLoaded();
     const unsubNetworkError = onNetworkError(() => {
       serverUnreachable = true;

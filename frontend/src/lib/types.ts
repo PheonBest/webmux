@@ -68,6 +68,8 @@ export type {
   SetWorktreeArchivedResponse,
   SetWorktreeLabelRequest,
   SetWorktreeLabelResponse,
+  PushPublicKeyResponse,
+  PushSubscribeRequest,
   UnpushedCommit,
   VersionCheckResponse,
   WorktreeCreationPhase,

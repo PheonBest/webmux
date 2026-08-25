@@ -17,6 +17,8 @@ import type {
   ProjectSummary,
   ProjectWorktreeSnapshot,
   RecoverDirectSwitchResponse,
+  PushPublicKeyResponse,
+  PushSubscribeRequest,
   UpsertCustomAgentRequest,
   ValidateCustomAgentResponse,
   VersionCheckResponse,
@@ -289,6 +291,18 @@ export function fetchVersionCheck(): Promise<VersionCheckResponse> {
  *  comes back before the restart happens. */
 export function triggerUpdate(): Promise<{ ok: true }> {
   return hubApi.triggerUpdate();
+}
+
+export function fetchPushPublicKey(): Promise<PushPublicKeyResponse> {
+  return hubApi.fetchPushPublicKey();
+}
+
+export function subscribePush(body: PushSubscribeRequest): Promise<{ ok: true }> {
+  return hubApi.subscribePush({ body });
+}
+
+export function unsubscribePush(endpoint: string): Promise<{ ok: true }> {
+  return hubApi.unsubscribePush({ body: { endpoint } });
 }
 
 function delay(ms: number): Promise<void> {
