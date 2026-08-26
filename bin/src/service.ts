@@ -131,6 +131,10 @@ function serviceFilePath(config: ServiceConfig): string {
 
 // ── Service file content ────────────────────────────────────────────────────
 
+/** KillMode=process (rather than the systemd default control-group) is required:
+ *  the webmux process spawns a detached `tmux` server that outlives it and hosts
+ *  every agent session. The default would SIGKILL that server's cgroup on every
+ *  `webmux service restart`, killing all running agents. */
 function generateSystemdUnit(config: ServiceConfig): string {
   // Sort by key so reinstalls / regenerations produce stable output regardless
   // of which order the user passed --env flags or which order Object.keys
@@ -147,6 +151,7 @@ ExecStart=${config.webmuxPath} serve --port ${config.port}
 WorkingDirectory=${homedir()}
 Restart=on-failure
 RestartSec=5
+KillMode=process
 Environment=PORT=${config.port}
 Environment=PATH=${process.env.PATH}${extra ? "\n" + extra : ""}
 
@@ -658,20 +663,27 @@ async function uninstall(config: ServiceConfig): Promise<void> {
   p.log.success("Service uninstalled.");
 }
 
-function restart(config: ServiceConfig): void {
+/** `service restart` also refreshes the unit file first (like `webmux update`
+ *  does) rather than just restarting the process. Without this, an installed
+ *  unit predating a template change (e.g. `KillMode=process`) would never pick
+ *  it up — `git pull && bun run build && webmux service restart`, this repo's
+ *  own self-update path, rebuilds the binary but never re-runs `install`. */
+async function restart(config: ServiceConfig): Promise<void> {
   if (!isInstalled(config)) {
     p.log.error("Service is not installed.");
     return;
   }
 
-  for (const cmd of restartCommands(config)) {
-    const result = runCommand(cmd);
-    if (!result.success) {
-      p.log.error(`Command failed: ${formatCommand(cmd)}\n${result.stderr.toString()}`);
-      return;
-    }
+  const { updateInstalledService } = await import("./service-restart.ts");
+  const outcome = await updateInstalledService(
+    { name: config.serviceName, filePath: serviceFilePath(config), platform: config.platform },
+    config.webmuxPath,
+  );
+  if (outcome.error) {
+    p.log.error(outcome.error);
+    return;
   }
-  p.log.success("Service restarted.");
+  p.log.success(outcome.regenerated ? "Service unit refreshed and restarted." : "Service restarted.");
 }
 
 function status(config: ServiceConfig): void {
@@ -854,7 +866,7 @@ export default async function service(args: string[]): Promise<void> {
       await uninstall(config);
       break;
     case "restart":
-      restart(config);
+      await restart(config);
       break;
     case "status":
       status(config);
