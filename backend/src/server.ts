@@ -147,6 +147,7 @@ import { ProjectManager, type ManagedProject, type ProjectLoopController } from 
 import { VersionCheckService } from "./services/version-check-service";
 import { PushSubscriptionStore, loadOrCreateVapidKeys, sendPushToAll, type VapidKeyPair } from "./services/push-service";
 import { buildWorkspaceDeepLink, resolveDiscordAgentIdentity, sendDiscordAlert } from "./services/alert-delivery-service";
+import type { RuntimeNotification } from "./services/notification-service";
 import { resolveWebmuxGitRepoRoot } from "./adapters/webmux-paths";
 
 const PORT = parseInt(Bun.env.PORT || "5111", 10);
@@ -241,7 +242,35 @@ runtimeNotifications.onNotify((notification) => {
  *  (only when DISCORD_WEBHOOK_URL is set — off by default). Both failures are
  *  swallowed inside their own helpers so a delivery problem never surfaces to
  *  the caller of notify(). */
-async function deliverAlert(notification: { branch: string; message: string }): Promise<void> {
+/** Best-effort recovery of the agent's last text reply for a branch (e.g. the
+ *  question it stopped on), so Discord alerts can show more than just "Agent
+ *  stopped on X". Returns null for anything that isn't cleanly resolvable —
+ *  no in-app chat support for the agent, no messages yet, a read failure —
+ *  since this only ever enriches an alert that must still go out without it. */
+async function resolveLastAgentMessage(branch: string): Promise<string | null> {
+  try {
+    const resolved = await resolveAgentsWorktree(branch);
+    if (!resolved.ok) return null;
+    const chatSupport = resolveWorktreeAgentChatSupport(resolved.worktree, "chat");
+    if (!chatSupport.ok) return null;
+    const result = chatSupport.data.provider === "claude"
+      ? await claudeConversationService.readWorktreeConversation(resolved.worktree)
+      : await worktreeConversationService.readWorktreeConversation(resolved.worktree);
+    if (!result.ok) return null;
+    const messages = result.data.conversation.messages;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const message = messages[i];
+      if (message.role === "assistant" && message.kind === "text" && message.text.trim()) {
+        return message.text.trim();
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function deliverAlert(notification: { branch: string; type: RuntimeNotification["type"]; message: string; timestamp: number }): Promise<void> {
   const url = buildWorkspaceDeepLink({ externalUrl: Bun.env.EXTERNAL_URL, prefix: instancePrefix, branch: notification.branch });
 
   const subscriptions = await pushSubscriptionStore.list();
@@ -265,7 +294,15 @@ async function deliverAlert(notification: { branch: string; message: string }): 
       codex: Bun.env.DISCORD_AVATAR_CODEX,
       opencode: Bun.env.DISCORD_AVATAR_OPENCODE,
     });
-    await sendDiscordAlert(discordWebhookUrl, { projectName: config.name, message: notification.message, url, identity });
+    const detail = notification.type === "agent_stopped" ? await resolveLastAgentMessage(notification.branch) : null;
+    await sendDiscordAlert(discordWebhookUrl, {
+      projectName: config.name,
+      message: notification.message,
+      url,
+      identity,
+      timestamp: notification.timestamp,
+      detail,
+    });
   }
 }
 const reconciliationService = runtime.reconciliationService;

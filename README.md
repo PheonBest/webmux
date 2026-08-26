@@ -81,7 +81,7 @@ For the notification (and an optional Discord message) to link back to the right
 echo 'EXTERNAL_URL=http://100.81.194.124:5111' >> ~/.config/webmux/.env
 ```
 
-**Optional — Discord.** Off by default; set `DISCORD_WEBHOOK_URL` to also post alerts to a Discord channel. Messages from a known builtin agent (`claude`, `codex`, `opencode`) post under that agent's name; set `DISCORD_AVATAR_CLAUDE` / `DISCORD_AVATAR_CODEX` / `DISCORD_AVATAR_OPENCODE` to override the avatar shown for each (Claude has a built-in default, the others fall back to the webhook's own avatar until you set one):
+**Optional — Discord.** Off by default; set `DISCORD_WEBHOOK_URL` to also post alerts to a Discord channel. Messages from a known builtin agent (`claude`, `codex`, `opencode`) post under that agent's name; set `DISCORD_AVATAR_CLAUDE` / `DISCORD_AVATAR_CODEX` / `DISCORD_AVATAR_OPENCODE` to override the avatar shown for each (Claude has a built-in default, the others fall back to the webhook's own avatar until you set one). An "agent stopped" alert also includes a local-time timestamp and, when it can be recovered, the agent's last message or question as a blockquote:
 
 ```bash
 echo 'DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...' >> ~/.config/webmux/.env

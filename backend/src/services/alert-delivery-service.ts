@@ -12,10 +12,40 @@ export function buildWorkspaceDeepLink(input: { externalUrl?: string; prefix?: s
   return `${base}${path}?${params.toString()}`;
 }
 
-export function buildDiscordMessage(input: { projectName: string; message: string; url: string | null }): string {
+const DISCORD_MESSAGE_MAX_LENGTH = 2000;
+const DISCORD_DETAIL_MAX_LENGTH = 1500;
+
+export function buildDiscordMessage(input: {
+  projectName: string;
+  message: string;
+  url: string | null;
+  /** Notification time (ms epoch) — rendered via Discord's `<t:...>` markup so
+   *  it shows in each reader's local time instead of a fixed-format string. */
+  timestamp?: number;
+  /** The agent's last text reply, when one could be recovered (e.g. for
+   *  "agent stopped" — its final message or question). Rendered as a
+   *  blockquote so real newlines from the agent's reply survive intact. */
+  detail?: string | null;
+}): string {
   const lines = [`**${input.projectName}** — ${input.message}`];
+  if (input.timestamp !== undefined) {
+    lines.push(`<t:${Math.floor(input.timestamp / 1000)}:f>`);
+  }
+  if (input.detail) {
+    const detail = input.detail.length > DISCORD_DETAIL_MAX_LENGTH
+      ? `${input.detail.slice(0, DISCORD_DETAIL_MAX_LENGTH)}…`
+      : input.detail;
+    lines.push(
+      "",
+      detail
+        .split("\n")
+        .map((line) => `> ${line}`)
+        .join("\n"),
+    );
+  }
   if (input.url) lines.push(input.url);
-  return lines.join("\n");
+  const full = lines.join("\n");
+  return full.length > DISCORD_MESSAGE_MAX_LENGTH ? `${full.slice(0, DISCORD_MESSAGE_MAX_LENGTH - 1)}…` : full;
 }
 
 /** Discord webhook `username`/`avatar_url` overrides for a given agent, so a
@@ -80,7 +110,14 @@ export const fetchDiscordSender: DiscordSender = {
 
 export async function sendDiscordAlert(
   webhookUrl: string,
-  input: { projectName: string; message: string; url: string | null; identity?: DiscordAgentIdentity | null },
+  input: {
+    projectName: string;
+    message: string;
+    url: string | null;
+    identity?: DiscordAgentIdentity | null;
+    timestamp?: number;
+    detail?: string | null;
+  },
   sender: DiscordSender = fetchDiscordSender,
 ): Promise<void> {
   try {

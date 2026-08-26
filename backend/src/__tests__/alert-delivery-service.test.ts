@@ -47,6 +47,41 @@ describe("buildDiscordMessage", () => {
     const message = buildDiscordMessage({ projectName: "webmux", message: "Agent stopped on feature/x", url: null });
     expect(message).toBe("**webmux** — Agent stopped on feature/x");
   });
+
+  it("renders the timestamp as a Discord local-time tag", () => {
+    const message = buildDiscordMessage({
+      projectName: "webmux",
+      message: "Agent stopped on feature/x",
+      url: null,
+      timestamp: 1_700_000_000_000,
+    });
+    expect(message).toBe("**webmux** — Agent stopped on feature/x\n<t:1700000000:f>");
+  });
+
+  it("renders the agent's last reply as a blockquote, preserving newlines", () => {
+    const message = buildDiscordMessage({
+      projectName: "webmux",
+      message: "Agent stopped on feature/x",
+      url: "http://host/webmux?workspace=feature/x",
+      detail: "Should I use approach A or B?\n\nBoth are viable.",
+    });
+    expect(message).toBe(
+      "**webmux** — Agent stopped on feature/x\n"
+        + "\n> Should I use approach A or B?\n> \n> Both are viable.\n"
+        + "http://host/webmux?workspace=feature/x",
+    );
+  });
+
+  it("truncates a very long detail instead of exceeding Discord's message limit", () => {
+    const message = buildDiscordMessage({
+      projectName: "webmux",
+      message: "Agent stopped on feature/x",
+      url: null,
+      detail: "x".repeat(3000),
+    });
+    expect(message.length).toBeLessThanOrEqual(2000);
+    expect(message.endsWith("…")).toBe(true);
+  });
 });
 
 describe("resolveDiscordAgentIdentity", () => {
