@@ -58,6 +58,9 @@ describe("NotificationService", () => {
     const response = notifications.stream();
     const reader = response.body!.getReader();
 
+    const bootChunk = await readChunk(reader);
+    expect(bootChunk).toContain("event: boot");
+
     const initialChunk = await readChunk(reader);
     expect(initialChunk).toContain("event: initial");
     expect(initialChunk).toContain(`\"id\":${initial!.id}`);
@@ -77,6 +80,21 @@ describe("NotificationService", () => {
     expect(dismissChunk).toContain(`\"id\":${live!.id}`);
 
     await reader.cancel();
+  });
+
+  it("sends the same boot id to every stream from this process", async () => {
+    const notifications = new NotificationService();
+
+    const readerA = notifications.stream().body!.getReader();
+    const readerB = notifications.stream().body!.getReader();
+    const bootA = JSON.parse((await readChunk(readerA)).split("data: ")[1]) as { bootId: string };
+    const bootB = JSON.parse((await readChunk(readerB)).split("data: ")[1]) as { bootId: string };
+
+    expect(bootA.bootId).toBe(bootB.bootId);
+    expect(bootA.bootId.length).toBeGreaterThan(0);
+
+    await readerA.cancel();
+    await readerB.cancel();
   });
 
   it("invokes onNotify listeners for every notify(), and stops after unsubscribe", () => {

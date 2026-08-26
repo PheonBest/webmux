@@ -331,6 +331,23 @@
     notificationHistory = [n, ...notificationHistory].slice(0, MAX_HISTORY);
   }
 
+  let serverBootId = $state<string | null>(null);
+  let reloadRequired = $state(false);
+
+  /** The notifications SSE connection sends its server's boot id as soon as it
+   *  connects, and the browser auto-reconnects it whenever the connection
+   *  drops. A reconnect that reports a *different* boot id than the one this
+   *  tab first saw means the server process restarted (a new build went out)
+   *  since this tab loaded its JS — prompt for a reload rather than silently
+   *  keep running stale code. */
+  function handleBoot(bootId: string): void {
+    if (serverBootId === null) {
+      serverBootId = bootId;
+      return;
+    }
+    if (bootId !== serverBootId) reloadRequired = true;
+  }
+
   function handleDismissNotification(id: number): void {
     notifications = notifications.filter((n) => n.id !== id);
     api.dismissNotification({ params: { id } }).catch(() => {});
@@ -1252,7 +1269,7 @@
     let intervalMs = pollIntervalMs;
     let interval: ReturnType<typeof setInterval> | undefined;
     window.addEventListener("keydown", handleKeydown);
-    let unsubNotifications = subscribeNotifications(handleNotification, handleSseDismiss, handleInitialNotification);
+    let unsubNotifications = subscribeNotifications(handleNotification, handleSseDismiss, handleInitialNotification, handleBoot);
     // Request notification permission (no-op if already granted/denied)
     if (Notification.permission === "default") {
       Notification.requestPermission().catch(() => {});
@@ -1512,7 +1529,7 @@
 
   <main class="flex-1 min-w-0 flex flex-col overflow-hidden">
     <MigrationBanner />
-    <UpdateBanner />
+    <UpdateBanner {reloadRequired} />
     <TopBar
       name={selectedWorktree?.branch ?? null}
       worktree={selectedWorktree}

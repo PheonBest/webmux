@@ -377,8 +377,16 @@ export function subscribeNotifications(
   onNotification: (n: AppNotification) => void,
   onDismiss: (id: number) => void,
   onInitial?: (n: AppNotification) => void,
+  onBoot?: (bootId: string) => void,
 ): () => void {
   const es = new EventSource(`${apiBase}/api/notifications/stream`);
+
+  es.addEventListener("boot", (e: MessageEvent) => {
+    try {
+      const { bootId } = JSON.parse(e.data as string) as { bootId: string };
+      onBoot?.(bootId);
+    } catch { /* ignore malformed SSE data */ }
+  });
 
   es.addEventListener("initial", (e: MessageEvent) => {
     try {

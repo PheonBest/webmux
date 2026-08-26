@@ -1,4 +1,12 @@
+import { randomUUID } from "node:crypto";
 import type { RuntimeEvent } from "../domain/events";
+
+/** One id per server process, generated at module load. Sent to every SSE
+ *  client as soon as it connects, so a tab whose EventSource reconnects
+ *  (browser auto-reconnect after the server process restarted) can tell it's
+ *  now talking to a new process and prompt for a reload — see the "boot"
+ *  event in `stream()` and its frontend handling in `subscribeNotifications`. */
+const SERVER_BOOT_ID = randomUUID();
 
 export interface RuntimeNotification {
   id: number;
@@ -85,6 +93,7 @@ export class NotificationService {
       start: (controller) => {
         controllerRef = controller;
         this.sseClients.add(controller);
+        controller.enqueue(this.formatSse("boot", { bootId: SERVER_BOOT_ID }));
         for (const notification of this.notifications) {
           controller.enqueue(this.formatSse("initial", notification));
         }

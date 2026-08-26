@@ -93,6 +93,10 @@ Once `DISCORD_WEBHOOK_URL` is set, a "Discord notifications" toggle appears next
 
 A stop that follows a `Monitor`/`ScheduleWakeup` call (the agent waiting on something that will resume it automatically) doesn't alert — only a real stop does. As a safety net, if a worktree sits stopped or waiting on you for 2 minutes with no alert sent (e.g. a permission prompt or question that has no dedicated alert of its own), one fires anyway with the agent's last message.
 
+### Picking up a new build in an already-open tab
+
+A tab left open through a `webmux service restart` keeps running the JS it already loaded — restarting the server doesn't touch it. Each tab's notification stream carries a per-process boot id; when the browser's automatic SSE reconnect reports a different one (the server process it's now talking to isn't the one this tab loaded from), a banner offers a one-click reload. No action needed beyond restarting the service as usual.
+
 ## Quick Start
 
 ```bash

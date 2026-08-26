@@ -4,6 +4,8 @@
 
   const DISMISSED_COMMIT_KEY = "webmux:update-banner-dismissed-commit";
 
+  let { reloadRequired = false }: { reloadRequired?: boolean } = $props();
+
   let latestCommit = $state<string | null>(null);
   let currentCommit = $state<string | null>(null);
   let commitsBehind = $state(0);
@@ -48,7 +50,17 @@
   }
 </script>
 
-{#if latestCommit && !dismissed}
+{#if reloadRequired}
+  <div class="flex items-start gap-3 px-4 py-2 text-[13px] bg-surface border-b border-edge text-primary">
+    <div class="flex-1 min-w-0">
+      <span class="text-accent font-medium">A new version was deployed.</span>
+      <span class="text-muted">This tab is running stale code.</span>
+      <button type="button" class="text-accent hover:underline font-medium" onclick={() => window.location.reload()}>
+        Reload
+      </button>
+    </div>
+  </div>
+{:else if latestCommit && !dismissed}
   <div class="flex items-start gap-3 px-4 py-2 text-[13px] bg-surface border-b border-edge text-primary">
     <div class="flex-1 min-w-0">
       {#if updating}

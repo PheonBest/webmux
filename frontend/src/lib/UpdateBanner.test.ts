@@ -17,6 +17,25 @@ describe("UpdateBanner", () => {
 
   afterEach(() => cleanup());
 
+  it("shows a reload prompt and skips the git check when reloadRequired is set", async () => {
+    vi.mocked(fetchVersionCheck).mockResolvedValue({
+      currentCommit: "abc1234",
+      latestCommit: null,
+      commitsBehind: 0,
+      updateAvailable: false,
+    });
+    const reloadSpy = vi.fn();
+    vi.stubGlobal("location", { ...window.location, reload: reloadSpy });
+
+    render(UpdateBanner, { reloadRequired: true });
+
+    expect(await screen.findByText(/new version was deployed/i)).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    expect(reloadSpy).toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
+  });
+
   it("shows nothing when no update is available", async () => {
     vi.mocked(fetchVersionCheck).mockResolvedValue({
       currentCommit: "abc1234",
