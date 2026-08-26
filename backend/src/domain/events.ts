@@ -2,7 +2,8 @@ export type RuntimeEventType =
   | "agent_stopped"
   | "agent_status_changed"
   | "pr_opened"
-  | "runtime_error";
+  | "runtime_error"
+  | "agent_last_tool";
 
 interface RuntimeEventBase {
   worktreeId: string;
@@ -29,11 +30,21 @@ export interface RuntimeErrorEvent extends RuntimeEventBase {
   message: string;
 }
 
+/** Reports the name of the tool the agent just called — used only to decide
+ *  whether a following `agent_stopped` is a real stop or a soft pause the
+ *  agent will resume on its own (see `WAIT_TOOL_NAMES` in server.ts). Never
+ *  applied to runtime state or surfaced as a notification. */
+export interface AgentLastToolEvent extends RuntimeEventBase {
+  type: "agent_last_tool";
+  toolName: string;
+}
+
 export type RuntimeEvent =
   | AgentStoppedEvent
   | AgentStatusChangedEvent
   | PrOpenedEvent
-  | RuntimeErrorEvent;
+  | RuntimeErrorEvent
+  | AgentLastToolEvent;
 
 function hasBaseFields(raw: Record<string, unknown>): raw is Record<string, string> & { type: RuntimeEventType } {
   return typeof raw.worktreeId === "string"
@@ -41,7 +52,7 @@ function hasBaseFields(raw: Record<string, unknown>): raw is Record<string, stri
     && typeof raw.branch === "string"
     && raw.branch.length > 0
     && typeof raw.type === "string"
-    && ["agent_stopped", "agent_status_changed", "pr_opened", "runtime_error"].includes(raw.type);
+    && ["agent_stopped", "agent_status_changed", "pr_opened", "runtime_error", "agent_last_tool"].includes(raw.type);
 }
 
 export function parseRuntimeEvent(raw: unknown): RuntimeEvent | null {
@@ -89,6 +100,15 @@ export function parseRuntimeEvent(raw: unknown): RuntimeEvent | null {
             branch: event.branch,
             type: event.type,
             message: event.message,
+          }
+        : null;
+    case "agent_last_tool":
+      return typeof event.toolName === "string" && event.toolName.length > 0
+        ? {
+            worktreeId: event.worktreeId,
+            branch: event.branch,
+            type: event.type,
+            toolName: event.toolName,
           }
         : null;
   }

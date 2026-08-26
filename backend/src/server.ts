@@ -329,6 +329,15 @@ const claudeConversationStreamService = new ClaudeConversationStreamService({
   claude: claudeCliClient,
 });
 const removingBranches = new Set<string>();
+/** Tool the agent most recently called on each branch, per `agent_last_tool`
+ *  events — used only to tell a real "agent stopped" from a soft pause where
+ *  the agent will resume itself (see WAIT_TOOL_NAMES). Ephemeral, cleared as
+ *  soon as a Stop event consumes it. */
+const lastToolByBranch = new Map<string, string>();
+/** Tool names that mean "the agent is waiting to be resumed automatically" —
+ *  a Stop event immediately following one of these isn't a real stop, so it's
+ *  suppressed rather than alerted on. */
+const WAIT_TOOL_NAMES = new Set(["Monitor", "ScheduleWakeup"]);
 const mutatingTabBranches = new Set<string>();
 const lifecycleService = runtime.lifecycleService;
 let linearAutoCreateEnabled = config.integrations.linear.autoCreateWorktrees;
@@ -1312,6 +1321,19 @@ async function apiRuntimeEvent(req: Request): Promise<Response> {
       }
     } else {
       throw error;
+    }
+  }
+
+  if (event.type === "agent_last_tool") {
+    lastToolByBranch.set(event.branch, event.toolName);
+    return jsonResponse({ ok: true });
+  }
+
+  if (event.type === "agent_stopped") {
+    const lastTool = lastToolByBranch.get(event.branch) ?? null;
+    lastToolByBranch.delete(event.branch);
+    if (lastTool && WAIT_TOOL_NAMES.has(lastTool)) {
+      return jsonResponse({ ok: true });
     }
   }
 

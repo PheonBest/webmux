@@ -55,7 +55,7 @@ describe("ensureAgentRuntimeArtifacts", () => {
     expect(settings.hooks?.Notification?.[0]?.matcher).toBe("permission_prompt|elicitation_dialog");
     expect(settings.hooks?.Notification?.[0]?.hooks?.[0]?.command).toContain("status-changed --lifecycle idle");
     expect(settings.hooks?.Stop?.[0]?.hooks?.[0]?.command).toContain("agent-stopped");
-    expect(settings.hooks?.PostToolUse?.[0]?.hooks?.[0]?.command).toContain("status-changed --lifecycle running");
+    expect(settings.hooks?.PostToolUse?.[0]?.hooks?.[0]?.command).toContain("claude-tool-used");
     expect(settings.hooks?.PostToolUse?.[1]?.hooks?.[0]?.command).toContain("claude-post-tool-use");
 
     const codexHooks = await Bun.file(artifacts.codexHooksPath).json() as {

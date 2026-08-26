@@ -80,6 +80,7 @@ def build_parser():
 
     subparsers.add_parser("claude-user-prompt-submit")
     subparsers.add_parser("claude-post-tool-use")
+    subparsers.add_parser("claude-tool-used")
     subparsers.add_parser("codex-session-start")
     subparsers.add_parser("codex-user-prompt-submit")
     subparsers.add_parser("codex-permission-request")
@@ -233,6 +234,22 @@ def main():
     if parsed.command == "claude-post-tool-use":
         hook_payload = read_hook_payload()
         return 0 if maybe_send_pr_opened(hook_payload, control_env) else 1
+
+    if parsed.command == "claude-tool-used":
+        hook_payload = read_hook_payload()
+        tool_name = hook_payload.get("tool_name")
+        status_ok = send_payload(build_payload("status-changed", argparse.Namespace(lifecycle="running"), control_env), control_env)
+        if isinstance(tool_name, str) and tool_name:
+            send_payload(
+                {
+                    "worktreeId": control_env["WEBMUX_WORKTREE_ID"],
+                    "branch": control_env["WEBMUX_BRANCH"],
+                    "type": "agent_last_tool",
+                    "toolName": tool_name,
+                },
+                control_env,
+            )
+        return 0 if status_ok else 1
 
     if parsed.command == "codex-stop":
         send_payload(build_payload("agent-stopped", parsed, control_env), control_env)
@@ -400,7 +417,7 @@ function buildClaudeHookSettings(input: AgentRuntimeArtifacts): HookConfigFile {
           hooks: [
             {
               type: "command",
-              command: `${shellQuote(input.agentCtlPath)} status-changed --lifecycle running`,
+              command: `${shellQuote(input.agentCtlPath)} claude-tool-used`,
               async: true,
             },
           ],

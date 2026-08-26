@@ -16,6 +16,28 @@ describe("parseRuntimeEvent", () => {
     });
   });
 
+  it("parses an agent_last_tool event", () => {
+    expect(parseRuntimeEvent({
+      worktreeId: "wt_search",
+      branch: "feature/search",
+      type: "agent_last_tool",
+      toolName: "Monitor",
+    })).toEqual({
+      worktreeId: "wt_search",
+      branch: "feature/search",
+      type: "agent_last_tool",
+      toolName: "Monitor",
+    });
+  });
+
+  it("rejects an agent_last_tool event with no toolName", () => {
+    expect(parseRuntimeEvent({
+      worktreeId: "wt_search",
+      branch: "feature/search",
+      type: "agent_last_tool",
+    })).toBeNull();
+  });
+
   it("rejects malformed runtime events", () => {
     expect(parseRuntimeEvent(null)).toBeNull();
     expect(parseRuntimeEvent({
