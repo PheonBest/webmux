@@ -27,10 +27,13 @@
     useWebChatUi,
     linearAutoCreate,
     autoRemoveOnMerge,
+    discordConfigured,
+    discordNotificationsEnabled,
     onthemechange,
     onwebchatuichange,
     onlinearautocreatechange,
     onautoremovechange,
+    ondiscordnotificationschange,
     onagentschange,
     onsave,
     onclose,
@@ -39,10 +42,13 @@
     useWebChatUi: boolean;
     linearAutoCreate: boolean;
     autoRemoveOnMerge: boolean;
+    discordConfigured: boolean;
+    discordNotificationsEnabled: boolean;
     onthemechange: (key: ThemeKey) => void;
     onwebchatuichange: (enabled: boolean) => void;
     onlinearautocreatechange: (enabled: boolean) => void;
     onautoremovechange: (enabled: boolean) => void;
+    ondiscordnotificationschange: (enabled: boolean) => void;
     onagentschange: (agents: AgentSummary[]) => void;
     onsave: (sshHost: string) => void;
     onclose: () => void;
@@ -56,6 +62,10 @@
   let pendingAutoRemove = $state<boolean | null>(null);
   let autoRemove = $derived(pendingAutoRemove ?? autoRemoveOnMerge);
   let autoRemoveSaving = $state(false);
+
+  let pendingDiscordNotifications = $state<boolean | null>(null);
+  let discordNotifications = $derived(pendingDiscordNotifications ?? discordNotificationsEnabled);
+  let discordNotificationsSaving = $state(false);
 
   let agents = $state<AgentDetails[]>([]);
   let customAgents = $derived(agents.filter((agent) => agent.kind === "custom"));
@@ -180,6 +190,19 @@
       .finally(() => {
         pendingAutoRemove = null;
         autoRemoveSaving = false;
+      });
+  }
+
+  function handleDiscordNotificationsToggle(enabled: boolean) {
+    pendingDiscordNotifications = enabled;
+    discordNotificationsSaving = true;
+    api.setDiscordNotifications({ body: { enabled } })
+      .then((result) => {
+        ondiscordnotificationschange(result.enabled);
+      })
+      .finally(() => {
+        pendingDiscordNotifications = null;
+        discordNotificationsSaving = false;
       });
   }
 
@@ -400,6 +423,25 @@
           disabled={pushBusy || pushState === "unsupported" || pushState === "denied"}
           ontoggle={handlePushToggle}
           aria-label="Push notifications"
+        />
+      </div>
+      <div class="flex items-center justify-between gap-3 px-3 py-2 mt-2 rounded-md border border-edge bg-surface">
+        <div>
+          <span class="text-[13px] text-primary">Discord notifications</span>
+          <p class="text-[11px] text-muted mt-0.5">
+            {#if !discordConfigured}
+              Not configured — set DISCORD_WEBHOOK_URL to enable.
+            {:else}
+              Post the same alerts to your Discord channel.
+            {/if}
+          </p>
+        </div>
+
+        <Toggle
+          checked={discordNotifications}
+          disabled={discordNotificationsSaving || !discordConfigured}
+          ontoggle={handleDiscordNotificationsToggle}
+          aria-label="Discord notifications"
         />
       </div>
     </div>

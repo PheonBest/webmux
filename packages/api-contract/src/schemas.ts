@@ -622,6 +622,10 @@ export const AppConfigSchema = z.object({
   linkedRepos: z.array(LinkedRepoInfoSchema),
   linearAutoCreateWorktrees: z.boolean(),
   autoRemoveOnMerge: z.boolean(),
+  /** Whether DISCORD_WEBHOOK_URL is set server-wide — the "Discord
+   *  notifications" toggle only has an effect when this is true. */
+  discordConfigured: z.boolean(),
+  discordNotificationsEnabled: z.boolean(),
   projectDir: z.string(),
   mainBranch: z.string(),
   /** WEBMUX_GROUP_MULTI_AGENT_SESSION — when true (default), selecting

@@ -240,6 +240,7 @@ const TEST_CONFIG: ProjectConfig = {
   integrations: {
     github: { linkedRepos: [], autoRemoveOnMerge: false },
     linear: { enabled: true, autoCreateWorktrees: false, createTicketOption: false },
+    discord: { enabled: true },
   },
   lifecycleHooks: {
     postCreate: "scripts/post-create.sh",

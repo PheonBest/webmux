@@ -77,9 +77,14 @@ export interface LinearIntegrationConfig {
   watchTeams?: string[];
 }
 
+export interface DiscordIntegrationConfig {
+  enabled: boolean;
+}
+
 export interface IntegrationConfig {
   github: GitHubIntegrationConfig;
   linear: LinearIntegrationConfig;
+  discord: DiscordIntegrationConfig;
 }
 
 export interface LifecycleHooksConfig {

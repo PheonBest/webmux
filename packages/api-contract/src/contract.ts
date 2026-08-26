@@ -100,6 +100,7 @@ export const apiPaths = {
   fetchAutoNameConfig: "/api/project/auto-name",
   setLinearAutoCreate: "/api/linear/auto-create",
   setAutoRemoveOnMerge: "/api/github/auto-remove-on-merge",
+  setDiscordNotifications: "/api/discord/notifications",
   pullMain: "/api/pull-main",
   fetchCiLogs: "/api/ci-logs/:runId",
   dismissNotification: "/api/notifications/:id/dismiss",
@@ -470,6 +471,15 @@ export const apiContract = c.router({
   setAutoRemoveOnMerge: {
     method: "PUT",
     path: apiPaths.setAutoRemoveOnMerge,
+    body: ToggleEnabledRequestSchema,
+    responses: {
+      200: EnabledResponseSchema,
+      ...commonErrorResponses,
+    },
+  },
+  setDiscordNotifications: {
+    method: "PUT",
+    path: apiPaths.setDiscordNotifications,
     body: ToggleEnabledRequestSchema,
     responses: {
       200: EnabledResponseSchema,

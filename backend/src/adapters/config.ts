@@ -8,6 +8,7 @@ import type {
   AutoNameConfig,
   AutoPullConfig,
   CustomAgentConfig,
+  DiscordIntegrationConfig,
   GitHubIntegrationConfig,
   LifecycleHooksConfig,
   LinearIntegrationConfig,
@@ -35,6 +36,7 @@ interface LocalProjectConfigOverlay {
   lifecycleHooks: LifecycleHooksConfig;
   linear: Partial<LinearIntegrationConfig> | null;
   github: Partial<GitHubIntegrationConfig> | null;
+  discord: Partial<DiscordIntegrationConfig> | null;
   autoPull: Partial<AutoPullConfig> | null;
 }
 
@@ -74,6 +76,7 @@ const DEFAULT_CONFIG: ProjectConfig = {
   integrations: {
     github: { linkedRepos: [], autoRemoveOnMerge: false },
     linear: { enabled: true, autoCreateWorktrees: false, createTicketOption: false },
+    discord: { enabled: true },
   },
   lifecycleHooks: {},
   autoName: null,
@@ -397,6 +400,11 @@ function parseProjectConfig(parsed: Record<string, unknown>): ProjectConfig {
           : DEFAULT_CONFIG.integrations.github.autoRemoveOnMerge,
       },
       linear: parseLinearIntegration(parsed),
+      discord: {
+        enabled: isRecord(parsed.integrations) && isRecord(parsed.integrations.discord) && typeof parsed.integrations.discord.enabled === "boolean"
+          ? parsed.integrations.discord.enabled
+          : DEFAULT_CONFIG.integrations.discord.enabled,
+      },
     },
     lifecycleHooks: parseLifecycleHooks(parsed.lifecycleHooks),
     autoName: parseAutoName(parsed.auto_name),
@@ -472,6 +480,16 @@ function parseLocalGitHubOverlay(parsed: Record<string, unknown>): Partial<GitHu
   return Object.keys(overlay).length > 0 ? overlay : null;
 }
 
+function parseLocalDiscordOverlay(parsed: Record<string, unknown>): Partial<DiscordIntegrationConfig> | null {
+  if (!isRecord(parsed.integrations)) return null;
+  const discord = parsed.integrations.discord;
+  if (!isRecord(discord)) return null;
+
+  const overlay: Partial<DiscordIntegrationConfig> = {};
+  if (typeof discord.enabled === "boolean") overlay.enabled = discord.enabled;
+  return Object.keys(overlay).length > 0 ? overlay : null;
+}
+
 function parseLocalAutoPullOverlay(parsed: Record<string, unknown>): Partial<AutoPullConfig> | null {
   if (!isRecord(parsed.workspace)) return null;
   const autoPull = parsed.workspace.autoPull;
@@ -489,7 +507,7 @@ function loadLocalProjectConfigOverlay(root: string): LocalProjectConfigOverlay 
   try {
     const text = readLocalConfigFile(root).trim();
     if (!text) {
-      return { worktreeRoot: null, profiles: {}, agents: {}, lifecycleHooks: {}, linear: null, github: null, autoPull: null };
+      return { worktreeRoot: null, profiles: {}, agents: {}, lifecycleHooks: {}, linear: null, github: null, discord: null, autoPull: null };
     }
 
     const parsed = parseConfigDocument(text);
@@ -501,10 +519,11 @@ function loadLocalProjectConfigOverlay(root: string): LocalProjectConfigOverlay 
       lifecycleHooks: parseLifecycleHooks(parsed.lifecycleHooks),
       linear: parseLocalLinearOverlay(parsed),
       github: parseLocalGitHubOverlay(parsed),
+      discord: parseLocalDiscordOverlay(parsed),
       autoPull: parseLocalAutoPullOverlay(parsed),
     };
   } catch {
-    return { worktreeRoot: null, profiles: {}, agents: {}, lifecycleHooks: {}, linear: null, github: null, autoPull: null };
+    return { worktreeRoot: null, profiles: {}, agents: {}, lifecycleHooks: {}, linear: null, github: null, discord: null, autoPull: null };
   }
 }
 
@@ -586,12 +605,13 @@ export function loadConfig(dir: string, options: LoadConfigOptions = {}): Projec
       }
     : projectConfig.workspace;
 
-  const hasIntegrationOverlay = localOverlay.linear || localOverlay.github;
+  const hasIntegrationOverlay = localOverlay.linear || localOverlay.github || localOverlay.discord;
   const integrations = hasIntegrationOverlay
     ? {
         ...projectConfig.integrations,
         ...(localOverlay.linear ? { linear: { ...projectConfig.integrations.linear, ...localOverlay.linear } } : {}),
         ...(localOverlay.github ? { github: { ...projectConfig.integrations.github, ...localOverlay.github } } : {}),
+        ...(localOverlay.discord ? { discord: { ...projectConfig.integrations.discord, ...localOverlay.discord } } : {}),
       }
     : projectConfig.integrations;
 
@@ -653,6 +673,23 @@ export async function persistLocalGitHubConfig(
   const github = isRecord(integrations.github) ? { ...integrations.github } : {};
   Object.assign(github, changes);
   integrations.github = github;
+  existing.integrations = integrations;
+
+  await Bun.write(localPath, stringifyYaml(existing));
+}
+
+/** Persist a partial Discord integration config override into `.webmux.local.yaml`. */
+export async function persistLocalDiscordConfig(
+  dir: string,
+  changes: Partial<DiscordIntegrationConfig>,
+): Promise<void> {
+  const root = projectRoot(dir);
+  const { localPath, existing } = readLocalConfigDocument(root);
+
+  const integrations = isRecord(existing.integrations) ? { ...existing.integrations } : {};
+  const discord = isRecord(integrations.discord) ? { ...integrations.discord } : {};
+  Object.assign(discord, changes);
+  integrations.discord = discord;
   existing.integrations = integrations;
 
   await Bun.write(localPath, stringifyYaml(existing));

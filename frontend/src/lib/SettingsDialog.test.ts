@@ -8,6 +8,7 @@ vi.mock("./api", () => ({
     fetchConfig: vi.fn(),
     setAutoRemoveOnMerge: vi.fn(),
     setLinearAutoCreate: vi.fn(),
+    setDiscordNotifications: vi.fn(),
   },
   fetchAgents: vi.fn(),
   createAgent: vi.fn(),
@@ -73,6 +74,8 @@ function createConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     linkedRepos: [],
     linearAutoCreateWorktrees: false,
     autoRemoveOnMerge: false,
+    discordConfigured: false,
+    discordNotificationsEnabled: false,
     projectDir: "/repo",
     mainBranch: "main",
     groupMultiAgentSingleWorkflow: true,
@@ -86,10 +89,13 @@ function renderDialog() {
     useWebChatUi: false,
     linearAutoCreate: false,
     autoRemoveOnMerge: false,
+    discordConfigured: false,
+    discordNotificationsEnabled: false,
     onthemechange: vi.fn(),
     onwebchatuichange: vi.fn(),
     onlinearautocreatechange: vi.fn(),
     onautoremovechange: vi.fn(),
+    ondiscordnotificationschange: vi.fn(),
     onagentschange: vi.fn(),
     onsave: vi.fn(),
     onclose: vi.fn(),
@@ -141,10 +147,13 @@ describe("SettingsDialog agent management", () => {
       useWebChatUi: false,
       linearAutoCreate: false,
       autoRemoveOnMerge: false,
+      discordConfigured: false,
+      discordNotificationsEnabled: false,
       onthemechange: vi.fn(),
       onwebchatuichange,
       onlinearautocreatechange: vi.fn(),
       onautoremovechange: vi.fn(),
+      ondiscordnotificationschange: vi.fn(),
       onagentschange: vi.fn(),
       onsave: vi.fn(),
       onclose: vi.fn(),
@@ -153,6 +162,42 @@ describe("SettingsDialog agent management", () => {
     await fireEvent.click(screen.getByRole("switch", { name: "Use web chat UI" }));
 
     expect(onwebchatuichange).toHaveBeenCalledWith(true);
+  });
+
+  it("toggles Discord notifications and reports the saved value", async () => {
+    const ondiscordnotificationschange = vi.fn();
+    vi.mocked(fetchAgents).mockResolvedValue([]);
+    vi.mocked(api.setDiscordNotifications).mockResolvedValue({ ok: true, enabled: true });
+
+    render(SettingsDialog, {
+      currentTheme: "github-dark",
+      useWebChatUi: false,
+      linearAutoCreate: false,
+      autoRemoveOnMerge: false,
+      discordConfigured: true,
+      discordNotificationsEnabled: false,
+      onthemechange: vi.fn(),
+      onwebchatuichange: vi.fn(),
+      onlinearautocreatechange: vi.fn(),
+      onautoremovechange: vi.fn(),
+      ondiscordnotificationschange,
+      onagentschange: vi.fn(),
+      onsave: vi.fn(),
+      onclose: vi.fn(),
+    });
+
+    await fireEvent.click(screen.getByRole("switch", { name: "Discord notifications" }));
+
+    expect(api.setDiscordNotifications).toHaveBeenCalledWith({ body: { enabled: true } });
+    await waitFor(() => expect(ondiscordnotificationschange).toHaveBeenCalledWith(true));
+  });
+
+  it("disables the Discord toggle when no webhook is configured", async () => {
+    vi.mocked(fetchAgents).mockResolvedValue([]);
+
+    renderDialog();
+
+    expect(screen.getByRole("switch", { name: "Discord notifications" })).toBeDisabled();
   });
 
   it("shows an empty state when no custom agents are configured", async () => {
@@ -190,10 +235,13 @@ describe("SettingsDialog agent management", () => {
       useWebChatUi: false,
       linearAutoCreate: false,
       autoRemoveOnMerge: false,
+      discordConfigured: false,
+      discordNotificationsEnabled: false,
       onthemechange: vi.fn(),
       onwebchatuichange: vi.fn(),
       onlinearautocreatechange: vi.fn(),
       onautoremovechange: vi.fn(),
+      ondiscordnotificationschange: vi.fn(),
       onagentschange,
       onsave: vi.fn(),
       onclose: vi.fn(),

@@ -99,6 +99,8 @@
       linkedRepos: [],
       linearAutoCreateWorktrees: false,
       autoRemoveOnMerge: false,
+      discordConfigured: false,
+      discordNotificationsEnabled: false,
       projectDir: "",
       mainBranch: "",
       groupMultiAgentSingleWorkflow: true,
@@ -1743,6 +1745,8 @@
     {useWebChatUi}
     linearAutoCreate={config.linearAutoCreateWorktrees ?? false}
     autoRemoveOnMerge={config.autoRemoveOnMerge ?? false}
+    discordConfigured={config.discordConfigured ?? false}
+    discordNotificationsEnabled={config.discordNotificationsEnabled ?? false}
     onthemechange={(key) => (currentTheme = key)}
     onwebchatuichange={(enabled) => {
       useWebChatUi = enabled;
@@ -1750,6 +1754,7 @@
     }}
     onlinearautocreatechange={(enabled) => { config.linearAutoCreateWorktrees = enabled; }}
     onautoremovechange={(enabled) => { config.autoRemoveOnMerge = enabled; }}
+    ondiscordnotificationschange={(enabled) => { config.discordNotificationsEnabled = enabled; }}
     onagentschange={(agents) => { config.agents = agents; }}
     onsave={(host) => {
       sshHost = host;

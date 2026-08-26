@@ -256,6 +256,8 @@ function createConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     linkedRepos: [],
     linearAutoCreateWorktrees: false,
     autoRemoveOnMerge: false,
+    discordConfigured: false,
+    discordNotificationsEnabled: false,
     projectDir: "/repo",
     mainBranch: "main",
     groupMultiAgentSingleWorkflow: true,

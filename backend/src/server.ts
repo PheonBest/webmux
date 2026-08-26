@@ -52,6 +52,7 @@ import { CodexAppServerClient, type CodexAppServerNotification } from "./adapter
 import {
   getDefaultProfileName,
   persistLocalCustomAgent,
+  persistLocalDiscordConfig,
   persistLocalGitHubConfig,
   persistLocalLinearConfig,
   projectRoot,
@@ -287,7 +288,7 @@ async function deliverAlert(notification: { branch: string; type: RuntimeNotific
   }
 
   const discordWebhookUrl = Bun.env.DISCORD_WEBHOOK_URL?.trim();
-  if (discordWebhookUrl) {
+  if (discordWebhookUrl && discordNotificationsEnabled) {
     const agentName = projectRuntime.listWorktrees().find((wt) => wt.branch === notification.branch)?.agentName ?? null;
     const identity = resolveDiscordAgentIdentity(agentName, {
       claude: Bun.env.DISCORD_AVATAR_CLAUDE,
@@ -339,17 +340,32 @@ const lastToolByBranch = new Map<string, string>();
  *  a Stop event immediately following one of these isn't a real stop, so it's
  *  suppressed rather than alerted on. */
 const WAIT_TOOL_NAMES = new Set(["Monitor", "ScheduleWakeup"]);
+
+/** Safety net for stalls that never produce a notification on their own: a
+ *  Claude permission/AskUserQuestion prompt only flips lifecycle to "idle"
+ *  (no notification), and a wait-tool-suppressed stop is deliberately silent
+ *  (see WAIT_TOOL_NAMES). If a worktree sits stopped/idle this long with no
+ *  notification delivered for that particular stall, one fires anyway so the
+ *  user isn't left waiting silently forever. */
+const FALLBACK_NOTIFICATION_DELAY_MS = 2 * 60 * 1000;
+const STALL_SWEEP_INTERVAL_MS = 30 * 1000;
+/** `branch -> agent.lastEventAt` already covered by a delivered notification
+ *  (real or fallback) — keyed by the exact timestamp so a later, distinct
+ *  stall on the same branch is free to fire its own fallback. */
+const notifiedEventAtByBranch = new Map<string, string>();
 const mutatingTabBranches = new Set<string>();
 const lifecycleService = runtime.lifecycleService;
 let linearAutoCreateEnabled = config.integrations.linear.autoCreateWorktrees;
 let stopLinearAutoCreate: (() => void) | null = null;
 let autoRemoveOnMergeEnabled = config.integrations.github.autoRemoveOnMerge;
+let discordNotificationsEnabled = config.integrations.discord.enabled;
 let stopPrMonitor: (() => void) | null = null;
 let stopAutoRemoveMonitor: (() => void) | null = null;
 let stopOneshotWatcher: (() => void) | null = null;
 let stopAutoPullMonitor: (() => void) | null = null;
 let stopSessionSnapshot: (() => void) | null = null;
 let stopBranchWarmup: (() => void) | null = null;
+let stallSweepTimer: ReturnType<typeof setInterval> | null = null;
 
 /** Create a worktree in oneshot mode for the given Linear issue and arm the
  *  server-side watcher to post results back + close the session when done. Returns
@@ -483,6 +499,8 @@ function getFrontendConfig(): {
   linkedRepos: Array<{ alias: string; dir?: string }>;
   linearAutoCreateWorktrees: boolean;
   autoRemoveOnMerge: boolean;
+  discordConfigured: boolean;
+  discordNotificationsEnabled: boolean;
   projectDir: string;
   mainBranch: string;
   groupMultiAgentSingleWorkflow: boolean;
@@ -515,6 +533,8 @@ function getFrontendConfig(): {
     })),
     linearAutoCreateWorktrees: linearAutoCreateEnabled,
     autoRemoveOnMerge: autoRemoveOnMergeEnabled,
+    discordConfigured: Boolean(Bun.env.DISCORD_WEBHOOK_URL?.trim()),
+    discordNotificationsEnabled,
     projectDir: PROJECT_DIR,
     mainBranch: config.workspace.mainBranch,
     groupMultiAgentSingleWorkflow: isGroupMultiAgentSessionEnabled(),
@@ -1343,10 +1363,34 @@ async function apiRuntimeEvent(req: Request): Promise<Response> {
   }
 
   const notification = runtimeNotifications.recordEvent(event);
+  if (notification) {
+    const state = projectRuntime.getWorktreeByBranch(event.branch);
+    if (state?.agent.lastEventAt) notifiedEventAtByBranch.set(event.branch, state.agent.lastEventAt);
+  }
   return jsonResponse({
     ok: true,
     ...(notification ? { notification } : {}),
   });
+}
+
+/** Fires the fallback described at FALLBACK_NOTIFICATION_DELAY_MS's
+ *  definition for any worktree that's been stopped/idle long enough with no
+ *  notification delivered for that particular stall. */
+function checkStalledAgents(): void {
+  const now = Date.now();
+  for (const state of projectRuntime.listWorktrees()) {
+    if (state.agent.lifecycle !== "stopped" && state.agent.lifecycle !== "idle") continue;
+    const lastEventAt = state.agent.lastEventAt;
+    if (!lastEventAt) continue;
+    if (now - Date.parse(lastEventAt) < FALLBACK_NOTIFICATION_DELAY_MS) continue;
+    if (notifiedEventAtByBranch.get(state.branch) === lastEventAt) continue;
+
+    notifiedEventAtByBranch.set(state.branch, lastEventAt);
+    const message = state.agent.lifecycle === "idle"
+      ? `Agent needs input on ${state.branch}`
+      : `Agent stopped on ${state.branch}`;
+    runtimeNotifications.notify({ branch: state.branch, type: "agent_stopped", message });
+  }
 }
 
 async function apiListBranches(req: Request): Promise<Response> {
@@ -1790,6 +1834,19 @@ async function apiSetAutoRemoveOnMerge(req: Request): Promise<Response> {
   await persistLocalGitHubConfig(PROJECT_DIR, { autoRemoveOnMerge: autoRemoveOnMergeEnabled });
 
   return jsonResponse({ ok: true, enabled: autoRemoveOnMergeEnabled });
+}
+
+async function apiSetDiscordNotifications(req: Request): Promise<Response> {
+  const parsed = await parseJsonBody(req, ToggleEnabledRequestSchema);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.data;
+
+  discordNotificationsEnabled = body.enabled;
+  log.info(`[config] Discord notifications ${discordNotificationsEnabled ? "enabled" : "disabled"}`);
+
+  await persistLocalDiscordConfig(PROJECT_DIR, { enabled: discordNotificationsEnabled });
+
+  return jsonResponse({ ok: true, enabled: discordNotificationsEnabled });
 }
 
 async function apiPullMain(req: Request): Promise<Response> {
@@ -2359,6 +2416,10 @@ function parseAgentIdParam(params: Record<string, string>):
       PUT: (req) => catching("PUT /api/github/auto-remove-on-merge", () => apiSetAutoRemoveOnMerge(req)),
     },
 
+    [apiPaths.setDiscordNotifications]: {
+      PUT: (req) => catching("PUT /api/discord/notifications", () => apiSetDiscordNotifications(req)),
+    },
+
     [apiPaths.pullMain]: {
       POST: (req) => catching("POST /api/pull-main", () => apiPullMain(req)),
     },
@@ -2545,9 +2606,12 @@ function parseAgentIdParam(params: Record<string, string>):
     // can take seconds on a slow filesystem (e.g. a WSL project mounted from
     // the Windows drive).
     stopBranchWarmup = lifecycleService.startBranchWarmup();
+    stallSweepTimer = setInterval(checkStalledAgents, STALL_SWEEP_INTERVAL_MS);
   }
 
   function stopLight(): void {
+    if (stallSweepTimer) clearInterval(stallSweepTimer);
+    stallSweepTimer = null;
     stopPrMonitor?.();
     stopPrMonitor = null;
     stopAutoRemoveMonitor?.();
