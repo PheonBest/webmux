@@ -146,7 +146,7 @@ import { createProjectsRegistry } from "./adapters/projects-registry";
 import { ProjectManager, type ManagedProject, type ProjectLoopController } from "./services/project-manager";
 import { VersionCheckService } from "./services/version-check-service";
 import { PushSubscriptionStore, loadOrCreateVapidKeys, sendPushToAll, type VapidKeyPair } from "./services/push-service";
-import { buildWorkspaceDeepLink, sendDiscordAlert } from "./services/alert-delivery-service";
+import { buildWorkspaceDeepLink, resolveDiscordAgentIdentity, sendDiscordAlert } from "./services/alert-delivery-service";
 import { resolveWebmuxGitRepoRoot } from "./adapters/webmux-paths";
 
 const PORT = parseInt(Bun.env.PORT || "5111", 10);
@@ -259,7 +259,13 @@ async function deliverAlert(notification: { branch: string; message: string }): 
 
   const discordWebhookUrl = Bun.env.DISCORD_WEBHOOK_URL?.trim();
   if (discordWebhookUrl) {
-    await sendDiscordAlert(discordWebhookUrl, { projectName: config.name, message: notification.message, url });
+    const agentName = projectRuntime.listWorktrees().find((wt) => wt.branch === notification.branch)?.agentName ?? null;
+    const identity = resolveDiscordAgentIdentity(agentName, {
+      claude: Bun.env.DISCORD_AVATAR_CLAUDE,
+      codex: Bun.env.DISCORD_AVATAR_CODEX,
+      opencode: Bun.env.DISCORD_AVATAR_OPENCODE,
+    });
+    await sendDiscordAlert(discordWebhookUrl, { projectName: config.name, message: notification.message, url, identity });
   }
 }
 const reconciliationService = runtime.reconciliationService;

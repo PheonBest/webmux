@@ -81,10 +81,11 @@ For the notification (and an optional Discord message) to link back to the right
 echo 'EXTERNAL_URL=http://100.81.194.124:5111' >> ~/.config/webmux/.env
 ```
 
-**Optional — Discord.** Off by default; set `DISCORD_WEBHOOK_URL` to also post alerts to a Discord channel:
+**Optional — Discord.** Off by default; set `DISCORD_WEBHOOK_URL` to also post alerts to a Discord channel. Messages from a known builtin agent (`claude`, `codex`, `opencode`) post under that agent's name; set `DISCORD_AVATAR_CLAUDE` / `DISCORD_AVATAR_CODEX` / `DISCORD_AVATAR_OPENCODE` to override the avatar shown for each (Claude has a built-in default, the others fall back to the webhook's own avatar until you set one):
 
 ```bash
 echo 'DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...' >> ~/.config/webmux/.env
+echo 'DISCORD_AVATAR_OPENCODE=https://your-host/opencode-icon.png' >> ~/.config/webmux/.env
 webmux service restart
 ```
 
