@@ -248,6 +248,7 @@ const TEST_CONFIG: ProjectConfig = {
   },
   autoName: null,
   oneshot: { systemPrompt: "be autonomous" },
+  alerts: { fallbackNotificationDelayMinutes: 5 },
 };
 
 const NO_DEFAULT_PROFILE_CONFIG: ProjectConfig = {

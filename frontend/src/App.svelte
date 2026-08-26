@@ -101,6 +101,7 @@
       autoRemoveOnMerge: false,
       discordConfigured: false,
       discordNotificationsEnabled: false,
+      fallbackNotificationDelayMinutes: 5,
       projectDir: "",
       mainBranch: "",
       groupMultiAgentSingleWorkflow: true,
@@ -1764,6 +1765,7 @@
     autoRemoveOnMerge={config.autoRemoveOnMerge ?? false}
     discordConfigured={config.discordConfigured ?? false}
     discordNotificationsEnabled={config.discordNotificationsEnabled ?? false}
+    fallbackNotificationDelayMinutes={config.fallbackNotificationDelayMinutes ?? 5}
     onthemechange={(key) => (currentTheme = key)}
     onwebchatuichange={(enabled) => {
       useWebChatUi = enabled;
@@ -1772,6 +1774,7 @@
     onlinearautocreatechange={(enabled) => { config.linearAutoCreateWorktrees = enabled; }}
     onautoremovechange={(enabled) => { config.autoRemoveOnMerge = enabled; }}
     ondiscordnotificationschange={(enabled) => { config.discordNotificationsEnabled = enabled; }}
+    onfallbacknotificationdelaychange={(minutes) => { config.fallbackNotificationDelayMinutes = minutes; }}
     onagentschange={(agents) => { config.agents = agents; }}
     onsave={(host) => {
       sshHost = host;

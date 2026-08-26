@@ -258,6 +258,7 @@ function createConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     autoRemoveOnMerge: false,
     discordConfigured: false,
     discordNotificationsEnabled: false,
+    fallbackNotificationDelayMinutes: 5,
     projectDir: "/repo",
     mainBranch: "main",
     groupMultiAgentSingleWorkflow: true,

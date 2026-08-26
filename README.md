@@ -91,7 +91,7 @@ webmux service restart
 
 Once `DISCORD_WEBHOOK_URL` is set, a "Discord notifications" toggle appears next to push under Settings → Notifications, per project — on by default, so you can turn it off without touching the `.env`.
 
-A stop that follows a `Monitor`/`ScheduleWakeup` call (the agent waiting on something that will resume it automatically) doesn't alert — only a real stop does. As a safety net, if a worktree sits stopped or waiting on you for 2 minutes with no alert sent (e.g. a permission prompt or question that has no dedicated alert of its own), one fires anyway with the agent's last message.
+A stop that follows a `Monitor`/`ScheduleWakeup` call (the agent waiting on something that will resume it automatically) doesn't alert — only a real stop does. As a safety net, if a worktree sits stopped or waiting on you for 5 minutes (default) with no alert sent (e.g. a permission prompt or question that has no dedicated alert of its own), one fires anyway with the agent's last message. Adjust the delay under Settings → Notifications → "Fallback alert delay".
 
 ### Picking up a new build in an already-open tab
 

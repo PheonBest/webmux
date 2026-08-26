@@ -21,6 +21,7 @@ import {
   PullMainRequestSchema,
   RunIdParamsSchema,
   SendWorktreePromptRequestSchema,
+  SetFallbackNotificationDelayRequestSchema,
   SetWorktreeArchivedRequestSchema,
   SetWorktreeLabelRequestSchema,
   SetWorktreeProfileRequestSchema,
@@ -52,6 +53,7 @@ import { CodexAppServerClient, type CodexAppServerNotification } from "./adapter
 import {
   getDefaultProfileName,
   persistLocalCustomAgent,
+  persistLocalAlertsConfig,
   persistLocalDiscordConfig,
   persistLocalGitHubConfig,
   persistLocalLinearConfig,
@@ -346,8 +348,10 @@ const WAIT_TOOL_NAMES = new Set(["Monitor", "ScheduleWakeup"]);
  *  (no notification), and a wait-tool-suppressed stop is deliberately silent
  *  (see WAIT_TOOL_NAMES). If a worktree sits stopped/idle this long with no
  *  notification delivered for that particular stall, one fires anyway so the
- *  user isn't left waiting silently forever. */
-const FALLBACK_NOTIFICATION_DELAY_MS = 2 * 60 * 1000;
+ *  user isn't left waiting silently forever. Configurable in Settings since
+ *  "stalled" is workload-dependent — a slow CI pipeline or cluster reconcile
+ *  needs more slack than the default. */
+let fallbackNotificationDelayMinutes = config.alerts.fallbackNotificationDelayMinutes;
 const STALL_SWEEP_INTERVAL_MS = 30 * 1000;
 /** `branch -> agent.lastEventAt` already covered by a delivered notification
  *  (real or fallback) — keyed by the exact timestamp so a later, distinct
@@ -501,6 +505,7 @@ function getFrontendConfig(): {
   autoRemoveOnMerge: boolean;
   discordConfigured: boolean;
   discordNotificationsEnabled: boolean;
+  fallbackNotificationDelayMinutes: number;
   projectDir: string;
   mainBranch: string;
   groupMultiAgentSingleWorkflow: boolean;
@@ -535,6 +540,7 @@ function getFrontendConfig(): {
     autoRemoveOnMerge: autoRemoveOnMergeEnabled,
     discordConfigured: Boolean(Bun.env.DISCORD_WEBHOOK_URL?.trim()),
     discordNotificationsEnabled,
+    fallbackNotificationDelayMinutes,
     projectDir: PROJECT_DIR,
     mainBranch: config.workspace.mainBranch,
     groupMultiAgentSingleWorkflow: isGroupMultiAgentSessionEnabled(),
@@ -1373,16 +1379,17 @@ async function apiRuntimeEvent(req: Request): Promise<Response> {
   });
 }
 
-/** Fires the fallback described at FALLBACK_NOTIFICATION_DELAY_MS's
+/** Fires the fallback described at fallbackNotificationDelayMinutes's
  *  definition for any worktree that's been stopped/idle long enough with no
  *  notification delivered for that particular stall. */
 function checkStalledAgents(): void {
   const now = Date.now();
+  const delayMs = fallbackNotificationDelayMinutes * 60 * 1000;
   for (const state of projectRuntime.listWorktrees()) {
     if (state.agent.lifecycle !== "stopped" && state.agent.lifecycle !== "idle") continue;
     const lastEventAt = state.agent.lastEventAt;
     if (!lastEventAt) continue;
-    if (now - Date.parse(lastEventAt) < FALLBACK_NOTIFICATION_DELAY_MS) continue;
+    if (now - Date.parse(lastEventAt) < delayMs) continue;
     if (notifiedEventAtByBranch.get(state.branch) === lastEventAt) continue;
 
     notifiedEventAtByBranch.set(state.branch, lastEventAt);
@@ -1847,6 +1854,19 @@ async function apiSetDiscordNotifications(req: Request): Promise<Response> {
   await persistLocalDiscordConfig(PROJECT_DIR, { enabled: discordNotificationsEnabled });
 
   return jsonResponse({ ok: true, enabled: discordNotificationsEnabled });
+}
+
+async function apiSetFallbackNotificationDelay(req: Request): Promise<Response> {
+  const parsed = await parseJsonBody(req, SetFallbackNotificationDelayRequestSchema);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.data;
+
+  fallbackNotificationDelayMinutes = body.minutes;
+  log.info(`[config] Fallback notification delay set to ${fallbackNotificationDelayMinutes} minute(s)`);
+
+  await persistLocalAlertsConfig(PROJECT_DIR, { fallbackNotificationDelayMinutes });
+
+  return jsonResponse({ ok: true, minutes: fallbackNotificationDelayMinutes });
 }
 
 async function apiPullMain(req: Request): Promise<Response> {
@@ -2418,6 +2438,10 @@ function parseAgentIdParam(params: Record<string, string>):
 
     [apiPaths.setDiscordNotifications]: {
       PUT: (req) => catching("PUT /api/discord/notifications", () => apiSetDiscordNotifications(req)),
+    },
+
+    [apiPaths.setFallbackNotificationDelay]: {
+      PUT: (req) => catching("PUT /api/alerts/fallback-delay", () => apiSetFallbackNotificationDelay(req)),
     },
 
     [apiPaths.pullMain]: {

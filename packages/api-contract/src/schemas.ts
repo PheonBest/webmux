@@ -26,6 +26,15 @@ export const EnabledResponseSchema = z.object({
   enabled: z.boolean(),
 });
 
+export const SetFallbackNotificationDelayRequestSchema = z.object({
+  minutes: z.number().finite().positive(),
+});
+
+export const FallbackNotificationDelayResponseSchema = z.object({
+  ok: z.literal(true),
+  minutes: z.number(),
+});
+
 export const BuiltInAgentIdSchema = z.enum(["claude", "codex", "opencode"]);
 export const AgentIdSchema = z.string().trim().min(1);
 export const AgentKindSchema = BuiltInAgentIdSchema;
@@ -626,6 +635,7 @@ export const AppConfigSchema = z.object({
    *  notifications" toggle only has an effect when this is true. */
   discordConfigured: z.boolean(),
   discordNotificationsEnabled: z.boolean(),
+  fallbackNotificationDelayMinutes: z.number(),
   projectDir: z.string(),
   mainBranch: z.string(),
   /** WEBMUX_GROUP_MULTI_AGENT_SESSION — when true (default), selecting

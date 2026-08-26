@@ -5,6 +5,7 @@ import { log } from "../lib/log";
 import type {
   AgentId,
   AgentKind,
+  AlertsConfig,
   AutoNameConfig,
   AutoPullConfig,
   CustomAgentConfig,
@@ -38,6 +39,7 @@ interface LocalProjectConfigOverlay {
   github: Partial<GitHubIntegrationConfig> | null;
   discord: Partial<DiscordIntegrationConfig> | null;
   autoPull: Partial<AutoPullConfig> | null;
+  alerts: Partial<AlertsConfig> | null;
 }
 
 const DEFAULT_PANES: PaneTemplate[] = [
@@ -81,6 +83,7 @@ const DEFAULT_CONFIG: ProjectConfig = {
   lifecycleHooks: {},
   autoName: null,
   oneshot: { systemPrompt: DEFAULT_ONESHOT_SYSTEM_PROMPT() },
+  alerts: { fallbackNotificationDelayMinutes: 5 },
 };
 
 function clonePanes(panes: PaneTemplate[]): PaneTemplate[] {
@@ -328,6 +331,16 @@ function parseAutoPull(raw: unknown): AutoPullConfig {
   return { enabled, intervalSeconds: interval };
 }
 
+function parseAlerts(raw: unknown): AlertsConfig {
+  if (!isRecord(raw)) return DEFAULT_CONFIG.alerts;
+  const minutes = raw.fallbackNotificationDelayMinutes;
+  return {
+    fallbackNotificationDelayMinutes: typeof minutes === "number" && Number.isFinite(minutes) && minutes > 0
+      ? minutes
+      : DEFAULT_CONFIG.alerts.fallbackNotificationDelayMinutes,
+  };
+}
+
 function parseLinkedRepos(raw: unknown): LinkedRepoConfig[] {
   if (!Array.isArray(raw)) return [];
 
@@ -409,6 +422,7 @@ function parseProjectConfig(parsed: Record<string, unknown>): ProjectConfig {
     lifecycleHooks: parseLifecycleHooks(parsed.lifecycleHooks),
     autoName: parseAutoName(parsed.auto_name),
     oneshot: parseOneshot(parsed.oneshot),
+    alerts: parseAlerts(parsed.alerts),
   };
 }
 
@@ -490,6 +504,18 @@ function parseLocalDiscordOverlay(parsed: Record<string, unknown>): Partial<Disc
   return Object.keys(overlay).length > 0 ? overlay : null;
 }
 
+function parseLocalAlertsOverlay(parsed: Record<string, unknown>): Partial<AlertsConfig> | null {
+  const alerts = parsed.alerts;
+  if (!isRecord(alerts)) return null;
+
+  const overlay: Partial<AlertsConfig> = {};
+  const minutes = alerts.fallbackNotificationDelayMinutes;
+  if (typeof minutes === "number" && Number.isFinite(minutes) && minutes > 0) {
+    overlay.fallbackNotificationDelayMinutes = minutes;
+  }
+  return Object.keys(overlay).length > 0 ? overlay : null;
+}
+
 function parseLocalAutoPullOverlay(parsed: Record<string, unknown>): Partial<AutoPullConfig> | null {
   if (!isRecord(parsed.workspace)) return null;
   const autoPull = parsed.workspace.autoPull;
@@ -507,7 +533,7 @@ function loadLocalProjectConfigOverlay(root: string): LocalProjectConfigOverlay 
   try {
     const text = readLocalConfigFile(root).trim();
     if (!text) {
-      return { worktreeRoot: null, profiles: {}, agents: {}, lifecycleHooks: {}, linear: null, github: null, discord: null, autoPull: null };
+      return { worktreeRoot: null, profiles: {}, agents: {}, lifecycleHooks: {}, linear: null, github: null, discord: null, autoPull: null, alerts: null };
     }
 
     const parsed = parseConfigDocument(text);
@@ -521,9 +547,10 @@ function loadLocalProjectConfigOverlay(root: string): LocalProjectConfigOverlay 
       github: parseLocalGitHubOverlay(parsed),
       discord: parseLocalDiscordOverlay(parsed),
       autoPull: parseLocalAutoPullOverlay(parsed),
+      alerts: parseLocalAlertsOverlay(parsed),
     };
   } catch {
-    return { worktreeRoot: null, profiles: {}, agents: {}, lifecycleHooks: {}, linear: null, github: null, discord: null, autoPull: null };
+    return { worktreeRoot: null, profiles: {}, agents: {}, lifecycleHooks: {}, linear: null, github: null, discord: null, autoPull: null, alerts: null };
   }
 }
 
@@ -628,6 +655,7 @@ export function loadConfig(dir: string, options: LoadConfigOptions = {}): Projec
     },
     lifecycleHooks: mergeLifecycleHooks(projectConfig.lifecycleHooks, localOverlay.lifecycleHooks),
     integrations,
+    alerts: localOverlay.alerts ? { ...projectConfig.alerts, ...localOverlay.alerts } : projectConfig.alerts,
   };
 }
 
@@ -691,6 +719,21 @@ export async function persistLocalDiscordConfig(
   Object.assign(discord, changes);
   integrations.discord = discord;
   existing.integrations = integrations;
+
+  await Bun.write(localPath, stringifyYaml(existing));
+}
+
+/** Persist a partial alerts config override into `.webmux.local.yaml`. */
+export async function persistLocalAlertsConfig(
+  dir: string,
+  changes: Partial<AlertsConfig>,
+): Promise<void> {
+  const root = projectRoot(dir);
+  const { localPath, existing } = readLocalConfigDocument(root);
+
+  const alerts = isRecord(existing.alerts) ? { ...existing.alerts } : {};
+  Object.assign(alerts, changes);
+  existing.alerts = alerts;
 
   await Bun.write(localPath, stringifyYaml(existing));
 }

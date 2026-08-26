@@ -29,11 +29,13 @@
     autoRemoveOnMerge,
     discordConfigured,
     discordNotificationsEnabled,
+    fallbackNotificationDelayMinutes,
     onthemechange,
     onwebchatuichange,
     onlinearautocreatechange,
     onautoremovechange,
     ondiscordnotificationschange,
+    onfallbacknotificationdelaychange,
     onagentschange,
     onsave,
     onclose,
@@ -44,11 +46,13 @@
     autoRemoveOnMerge: boolean;
     discordConfigured: boolean;
     discordNotificationsEnabled: boolean;
+    fallbackNotificationDelayMinutes: number;
     onthemechange: (key: ThemeKey) => void;
     onwebchatuichange: (enabled: boolean) => void;
     onlinearautocreatechange: (enabled: boolean) => void;
     onautoremovechange: (enabled: boolean) => void;
     ondiscordnotificationschange: (enabled: boolean) => void;
+    onfallbacknotificationdelaychange: (minutes: number) => void;
     onagentschange: (agents: AgentSummary[]) => void;
     onsave: (sshHost: string) => void;
     onclose: () => void;
@@ -66,6 +70,10 @@
   let pendingDiscordNotifications = $state<boolean | null>(null);
   let discordNotifications = $derived(pendingDiscordNotifications ?? discordNotificationsEnabled);
   let discordNotificationsSaving = $state(false);
+
+  let fallbackDelayDraft = $state(String(fallbackNotificationDelayMinutes));
+  let fallbackDelaySaving = $state(false);
+  let fallbackDelayError = $state<string | null>(null);
 
   let agents = $state<AgentDetails[]>([]);
   let customAgents = $derived(agents.filter((agent) => agent.kind === "custom"));
@@ -203,6 +211,31 @@
       .finally(() => {
         pendingDiscordNotifications = null;
         discordNotificationsSaving = false;
+      });
+  }
+
+  function handleFallbackDelayBlur() {
+    const minutes = Number(fallbackDelayDraft);
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      fallbackDelayError = "Enter a number of minutes greater than 0.";
+      fallbackDelayDraft = String(fallbackNotificationDelayMinutes);
+      return;
+    }
+    fallbackDelayError = null;
+    if (minutes === fallbackNotificationDelayMinutes) return;
+
+    fallbackDelaySaving = true;
+    api.setFallbackNotificationDelay({ body: { minutes } })
+      .then((result) => {
+        fallbackDelayDraft = String(result.minutes);
+        onfallbacknotificationdelaychange(result.minutes);
+      })
+      .catch((err) => {
+        fallbackDelayError = errorMessage(err);
+        fallbackDelayDraft = String(fallbackNotificationDelayMinutes);
+      })
+      .finally(() => {
+        fallbackDelaySaving = false;
       });
   }
 
@@ -443,6 +476,32 @@
           ontoggle={handleDiscordNotificationsToggle}
           aria-label="Discord notifications"
         />
+      </div>
+      <div class="flex items-center justify-between gap-3 px-3 py-2 mt-2 rounded-md border border-edge bg-surface">
+        <div>
+          <span class="text-[13px] text-primary">Fallback alert delay</span>
+          <p class="text-[11px] text-muted mt-0.5">
+            Alert anyway if a worktree sits stopped or waiting on you this long with nothing else sent.
+          </p>
+          {#if fallbackDelayError}
+            <p class="text-[11px] text-danger mt-0.5">{fallbackDelayError}</p>
+          {/if}
+        </div>
+
+        <div class="flex items-center gap-1.5 shrink-0">
+          <input
+            type="number"
+            min="1"
+            step="1"
+            class="w-14 px-2 py-1 rounded-md border border-edge bg-bg text-[13px] text-primary text-right"
+            aria-label="Fallback alert delay in minutes"
+            disabled={fallbackDelaySaving}
+            bind:value={fallbackDelayDraft}
+            onblur={handleFallbackDelayBlur}
+            onkeydown={(e) => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }}
+          />
+          <span class="text-[12px] text-muted">min</span>
+        </div>
       </div>
     </div>
 

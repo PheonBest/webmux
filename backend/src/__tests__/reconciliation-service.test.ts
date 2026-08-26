@@ -224,6 +224,7 @@ const TEST_CONFIG: ProjectConfig = {
   lifecycleHooks: {},
   autoName: null,
   oneshot: { systemPrompt: "" },
+  alerts: { fallbackNotificationDelayMinutes: 5 },
 };
 
 describe("ReconciliationService", () => {

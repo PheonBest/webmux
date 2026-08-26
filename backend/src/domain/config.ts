@@ -102,6 +102,12 @@ export interface OneshotConfig {
   systemPrompt: string;
 }
 
+export interface AlertsConfig {
+  /** How long a worktree may sit stopped/idle with no notification delivered
+   *  before the fallback alert fires (see checkStalledAgents in server.ts). */
+  fallbackNotificationDelayMinutes: number;
+}
+
 export interface ProjectConfig {
   name: string;
   workspace: WorkspaceConfig;
@@ -113,4 +119,5 @@ export interface ProjectConfig {
   lifecycleHooks: LifecycleHooksConfig;
   autoName: AutoNameConfig | null;
   oneshot: OneshotConfig;
+  alerts: AlertsConfig;
 }

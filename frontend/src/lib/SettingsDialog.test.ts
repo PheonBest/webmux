@@ -9,6 +9,7 @@ vi.mock("./api", () => ({
     setAutoRemoveOnMerge: vi.fn(),
     setLinearAutoCreate: vi.fn(),
     setDiscordNotifications: vi.fn(),
+    setFallbackNotificationDelay: vi.fn(),
   },
   fetchAgents: vi.fn(),
   createAgent: vi.fn(),
@@ -76,6 +77,7 @@ function createConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     autoRemoveOnMerge: false,
     discordConfigured: false,
     discordNotificationsEnabled: false,
+    fallbackNotificationDelayMinutes: 5,
     projectDir: "/repo",
     mainBranch: "main",
     groupMultiAgentSingleWorkflow: true,
@@ -91,11 +93,13 @@ function renderDialog() {
     autoRemoveOnMerge: false,
     discordConfigured: false,
     discordNotificationsEnabled: false,
+    fallbackNotificationDelayMinutes: 5,
     onthemechange: vi.fn(),
     onwebchatuichange: vi.fn(),
     onlinearautocreatechange: vi.fn(),
     onautoremovechange: vi.fn(),
     ondiscordnotificationschange: vi.fn(),
+    onfallbacknotificationdelaychange: vi.fn(),
     onagentschange: vi.fn(),
     onsave: vi.fn(),
     onclose: vi.fn(),
@@ -149,11 +153,13 @@ describe("SettingsDialog agent management", () => {
       autoRemoveOnMerge: false,
       discordConfigured: false,
       discordNotificationsEnabled: false,
+      fallbackNotificationDelayMinutes: 5,
       onthemechange: vi.fn(),
       onwebchatuichange,
       onlinearautocreatechange: vi.fn(),
       onautoremovechange: vi.fn(),
       ondiscordnotificationschange: vi.fn(),
+      onfallbacknotificationdelaychange: vi.fn(),
       onagentschange: vi.fn(),
       onsave: vi.fn(),
       onclose: vi.fn(),
@@ -176,11 +182,13 @@ describe("SettingsDialog agent management", () => {
       autoRemoveOnMerge: false,
       discordConfigured: true,
       discordNotificationsEnabled: false,
+      fallbackNotificationDelayMinutes: 5,
       onthemechange: vi.fn(),
       onwebchatuichange: vi.fn(),
       onlinearautocreatechange: vi.fn(),
       onautoremovechange: vi.fn(),
       ondiscordnotificationschange,
+      onfallbacknotificationdelaychange: vi.fn(),
       onagentschange: vi.fn(),
       onsave: vi.fn(),
       onclose: vi.fn(),
@@ -190,6 +198,32 @@ describe("SettingsDialog agent management", () => {
 
     expect(api.setDiscordNotifications).toHaveBeenCalledWith({ body: { enabled: true } });
     await waitFor(() => expect(ondiscordnotificationschange).toHaveBeenCalledWith(true));
+  });
+
+  it("saves the fallback alert delay on blur", async () => {
+    vi.mocked(fetchAgents).mockResolvedValue([]);
+    vi.mocked(api.setFallbackNotificationDelay).mockResolvedValue({ ok: true, minutes: 10 });
+
+    renderDialog();
+
+    const input = screen.getByRole("spinbutton", { name: "Fallback alert delay in minutes" });
+    await fireEvent.input(input, { target: { value: "10" } });
+    await fireEvent.blur(input);
+
+    await waitFor(() => expect(api.setFallbackNotificationDelay).toHaveBeenCalledWith({ body: { minutes: 10 } }));
+  });
+
+  it("rejects a non-positive fallback delay without saving", async () => {
+    vi.mocked(fetchAgents).mockResolvedValue([]);
+
+    renderDialog();
+
+    const input = screen.getByRole("spinbutton", { name: "Fallback alert delay in minutes" });
+    await fireEvent.input(input, { target: { value: "0" } });
+    await fireEvent.blur(input);
+
+    expect(api.setFallbackNotificationDelay).not.toHaveBeenCalled();
+    expect(await screen.findByText(/enter a number of minutes/i)).toBeInTheDocument();
   });
 
   it("disables the Discord toggle when no webhook is configured", async () => {
@@ -237,11 +271,13 @@ describe("SettingsDialog agent management", () => {
       autoRemoveOnMerge: false,
       discordConfigured: false,
       discordNotificationsEnabled: false,
+      fallbackNotificationDelayMinutes: 5,
       onthemechange: vi.fn(),
       onwebchatuichange: vi.fn(),
       onlinearautocreatechange: vi.fn(),
       onautoremovechange: vi.fn(),
       ondiscordnotificationschange: vi.fn(),
+      onfallbacknotificationdelaychange: vi.fn(),
       onagentschange,
       onsave: vi.fn(),
       onclose: vi.fn(),
