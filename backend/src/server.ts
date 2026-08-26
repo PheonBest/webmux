@@ -331,8 +331,9 @@ const claudeConversationStreamService = new ClaudeConversationStreamService({
 const removingBranches = new Set<string>();
 /** Tool the agent most recently called on each branch, per `agent_last_tool`
  *  events — used only to tell a real "agent stopped" from a soft pause where
- *  the agent will resume itself (see WAIT_TOOL_NAMES). Ephemeral, cleared as
- *  soon as a Stop event consumes it. */
+ *  the agent will resume itself (see WAIT_TOOL_NAMES). Sticky: only replaced
+ *  by the next tool call, not cleared on Stop, since a blocking Stop hook can
+ *  force several stop attempts through with no new tool call in between. */
 const lastToolByBranch = new Map<string, string>();
 /** Tool names that mean "the agent is waiting to be resumed automatically" —
  *  a Stop event immediately following one of these isn't a real stop, so it's
@@ -1330,8 +1331,12 @@ async function apiRuntimeEvent(req: Request): Promise<Response> {
   }
 
   if (event.type === "agent_stopped") {
+    // Deliberately not cleared here: a blocking Stop hook (e.g. Monitor's own
+    // wait loop) can force the agent through several stop attempts with no
+    // new tool call in between. Only a *different* tool call (a new
+    // agent_last_tool event) should un-stick the suppression — see
+    // WAIT_TOOL_NAMES above.
     const lastTool = lastToolByBranch.get(event.branch) ?? null;
-    lastToolByBranch.delete(event.branch);
     if (lastTool && WAIT_TOOL_NAMES.has(lastTool)) {
       return jsonResponse({ ok: true });
     }
