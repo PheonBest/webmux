@@ -16,7 +16,7 @@ const { MockFitAddon, MockTerminal } = vi.hoisted(() => {
   class MockTerminal {
     static instances: MockTerminal[] = [];
 
-    options: { theme?: unknown } = {};
+    options: { theme?: unknown; macOptionIsMeta?: boolean } = {};
     cols = 80;
     rows = 24;
     modes = { mouseTrackingMode: "none" };
@@ -31,7 +31,8 @@ const { MockFitAddon, MockTerminal } = vi.hoisted(() => {
     dispose = vi.fn();
     scrollToBottom = vi.fn();
 
-    constructor(_options: unknown) {
+    constructor(options: Record<string, unknown>) {
+      Object.assign(this.options, options);
       MockTerminal.instances.push(this);
     }
 
@@ -234,6 +235,38 @@ describe("Terminal reconnect", () => {
 
     expect(rendered.component.copyLastSelectionToClipboard()).toBe(true);
     expect(writeText).toHaveBeenCalledWith("copied text");
+
+    vi.unstubAllGlobals();
+  });
+
+  it("enables macOptionIsMeta so Option+key sends the tmux Meta prefix on macOS", async () => {
+    render(Terminal, {
+      props: { worktree: "feature/prefix", terminalTheme: getTheme("github-dark").terminal },
+    });
+
+    expect(MockTerminal.instances[0]!.options.macOptionIsMeta).toBe(true);
+  });
+
+  it("decodes OSC 52 payloads as UTF-8 rather than raw bytes", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+
+    const rendered = render(Terminal, {
+      props: { worktree: "feature/clipboard-utf8", terminalTheme: getTheme("github-dark").terminal },
+    });
+
+    const terminal = MockTerminal.instances[0]!;
+    const calls = terminal.parser.registerOscHandler.mock.calls as unknown as Array<
+      [number, (data: string) => boolean]
+    >;
+    const oscHandler = calls.find(([code]) => code === 52)?.[1];
+    if (!oscHandler) throw new Error("OSC 52 handler was not registered");
+
+    const text = "capacité vérifiée ┼─┬";
+    const b64 = btoa(String.fromCharCode(...new TextEncoder().encode(text)));
+    oscHandler(`0;${b64}`);
+
+    expect(writeText).toHaveBeenCalledWith(text);
 
     vi.unstubAllGlobals();
   });

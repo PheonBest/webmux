@@ -366,6 +366,9 @@
       fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
       fontSize: isMobile ? 13 : 11,
       scrollback: 10000,
+      // macOS: send ESC+key for Option combos (e.g. the tmux M-a prefix)
+      // instead of composing a special character like "æ".
+      macOptionIsMeta: true,
     });
 
     fitAddon = new FitAddon();
@@ -386,7 +389,8 @@
       if (idx !== -1) {
         const b64 = data.slice(idx + 1);
         try {
-          copyToClipboard(atob(b64));
+          const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+          copyToClipboard(new TextDecoder().decode(bytes));
         } catch {}
       }
       return true;
