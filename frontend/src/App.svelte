@@ -37,6 +37,7 @@
   } from "./lib/types";
   import {
     SSH_STORAGE_KEY,
+    deriveSshHost,
     makeCursorUrl,
     makeVscodeUrl,
     errorMessage,
@@ -151,6 +152,9 @@
   let nextAvailableBranchFetchId = 0;
   let nextBaseBranchFetchId = 0;
   let sshHost = $state(localStorage.getItem(SSH_STORAGE_KEY) ?? "");
+  // Editor deep-links need a host reachable from the user's machine; when the SSH
+  // Host setting is blank, reuse the address the browser reached webmux on.
+  let effectiveSshHost = $derived(deriveSshHost(sshHost, location.hostname));
   // agent-flow (github.com/patoles/agent-flow) runs alongside webmux on the same host,
   // installed by webmux-machine-setup.sh — reuse whatever host/protocol got us to webmux
   // itself so this keeps working over SSH tunnels/reverse proxies, not just localhost.
@@ -449,6 +453,7 @@
     | {
         sendSelectPane: (pane: number) => void;
         copyLastSelectionToClipboard: () => boolean;
+        forceResize: () => void;
       }
     | undefined = $state();
 
@@ -1466,16 +1471,16 @@
       {#if config.projectDir}
         <SidebarRepoRow
           label={config.mainBranch ?? "main"}
-          cursorUrl={makeCursorUrl(config.projectDir, sshHost) ?? ""}
-          vscodeUrl={makeVscodeUrl(config.projectDir, sshHost) ?? ""}
+          cursorUrl={makeCursorUrl(config.projectDir, effectiveSshHost) ?? ""}
+          vscodeUrl={makeVscodeUrl(config.projectDir, effectiveSshHost) ?? ""}
           onpull={() => { pullMainConfirm = true; pullMainForce = false; pullMainError = ""; }}
         />
       {/if}
       {#each (config.linkedRepos ?? []).filter((lr) => lr.dir) as lr (lr.alias)}
         <SidebarRepoRow
           label={lr.alias}
-          cursorUrl={makeCursorUrl(lr.dir, sshHost) ?? ""}
-          vscodeUrl={makeVscodeUrl(lr.dir, sshHost) ?? ""}
+          cursorUrl={makeCursorUrl(lr.dir, effectiveSshHost) ?? ""}
+          vscodeUrl={makeVscodeUrl(lr.dir, effectiveSshHost) ?? ""}
           onpull={() => { pullLinkedRepoAlias = lr.alias; pullLinkedRepoForce = false; pullLinkedRepoError = ""; }}
         />
       {/each}
@@ -1534,7 +1539,7 @@
     <TopBar
       name={selectedWorktree?.branch ?? null}
       worktree={selectedWorktree}
-      {sshHost}
+      sshHost={effectiveSshHost}
       linkedRepos={config.linkedRepos ?? []}
       {isMobile}
       {notificationHistory}
@@ -1549,6 +1554,12 @@
         if (selectedBranch) removeBranch = selectedBranch;
       }}
       oncopyterminal={copyLastTerminalSelection}
+      onforceresize={selectedWorktree && !selectedWorktree.creating
+        ? () => {
+            terminalRef?.forceResize();
+            showToast({ tone: "success", message: "Terminal resized" });
+          }
+        : undefined}
       oneditlabel={openLabelDialog}
       onsettings={() => (showSettingsDialog = true)}
       ondirtyclick={openDiffDialog}
@@ -1809,8 +1820,8 @@
 {#if showDiffDialog && selectedBranch && DiffDialogComponent}
   <DiffDialogComponent
     branch={selectedBranch}
-    cursorUrl={makeCursorUrl(selectedWorktree?.dir, sshHost)}
-    vscodeUrl={makeVscodeUrl(selectedWorktree?.dir, sshHost)}
+    cursorUrl={makeCursorUrl(selectedWorktree?.dir, effectiveSshHost)}
+    vscodeUrl={makeVscodeUrl(selectedWorktree?.dir, effectiveSshHost)}
     onclose={() => (showDiffDialog = false)}
   />
 {/if}

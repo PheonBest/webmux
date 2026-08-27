@@ -239,6 +239,21 @@ describe("Terminal reconnect", () => {
     vi.unstubAllGlobals();
   });
 
+  it("re-fits and re-sends the terminal size when forceResize is called", () => {
+    const rendered = render(Terminal, {
+      props: { worktree: "feature/resize", terminalTheme: getTheme("github-dark").terminal },
+    });
+
+    const socket = MockWebSocket.instances[0]!;
+    socket.emitOpen();
+    socket.sent.length = 0;
+
+    (rendered.component as unknown as { forceResize: () => void }).forceResize();
+
+    expect(MockFitAddon.instances[0]!.fit).toHaveBeenCalled();
+    expect(socket.sent).toContain('{"type":"resize","cols":80,"rows":24}');
+  });
+
   it("enables macOptionIsMeta so Option+key sends the tmux Meta prefix on macOS", async () => {
     render(Terminal, {
       props: { worktree: "feature/prefix", terminalTheme: getTheme("github-dark").terminal },

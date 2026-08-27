@@ -25,6 +25,7 @@
     onmerge,
     onremove,
     oncopyterminal,
+    onforceresize,
     oneditlabel,
     onsettings,
     onCiClick,
@@ -47,6 +48,7 @@
     onmerge: () => void;
     onremove: () => void;
     oncopyterminal?: () => void;
+    onforceresize?: () => void;
     oneditlabel?: () => void;
     onsettings: () => void;
     onCiClick: (pr: PrEntry) => void;
@@ -355,6 +357,23 @@
         </div>
       {/if}
     </div>
+
+    {#if onforceresize}
+      <button
+        type="button"
+        class="p-1.5 rounded-md cursor-pointer bg-transparent border border-transparent text-muted hover:text-primary hover:border-edge"
+        title="Resize terminal"
+        aria-label="Resize terminal"
+        onclick={onforceresize}
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M15 3h6v6" />
+          <path d="M9 21H3v-6" />
+          <path d="M21 3l-7 7" />
+          <path d="M3 21l7-7" />
+        </svg>
+      </button>
+    {/if}
 
     {#if oncopyterminal}
       <button

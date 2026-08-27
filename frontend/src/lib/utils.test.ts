@@ -4,6 +4,7 @@ import {
   LAST_SELECTED_WORKTREE_STORAGE_KEY,
   WEB_CHAT_UI_STORAGE_KEY,
   clearWorkspaceQueryParam,
+  deriveSshHost,
   loadSavedSelectedWorktree,
   loadUseWebChatUi,
   readWorkspaceQueryParam,
@@ -117,5 +118,25 @@ describe("PR draft styling", () => {
   it("keeps merged and closed colors regardless of the draft flag", () => {
     expect(prBadgeClass(pr({ state: "merged", isDraft: true }))).toBe("bg-merged/20 text-merged");
     expect(prStateTextClass(pr({ state: "closed", isDraft: true }))).toBe("text-danger");
+  });
+});
+
+describe("deriveSshHost", () => {
+  it("prefers an explicit setting over the browser hostname", () => {
+    expect(deriveSshHost("devbox", "192.168.1.197")).toBe("devbox");
+    expect(deriveSshHost("  devbox  ", "192.168.1.197")).toBe("devbox");
+  });
+
+  it("falls back to the browser hostname when no setting is configured", () => {
+    expect(deriveSshHost("", "192.168.1.197")).toBe("192.168.1.197");
+    expect(deriveSshHost(null, "100.81.194.124")).toBe("100.81.194.124");
+    expect(deriveSshHost(undefined, "box.tail-scale.ts.net")).toBe("box.tail-scale.ts.net");
+  });
+
+  it("stays in local mode for loopback or missing hostnames", () => {
+    expect(deriveSshHost("", "localhost")).toBe("");
+    expect(deriveSshHost("", "127.0.0.1")).toBe("");
+    expect(deriveSshHost("", "[::1]")).toBe("");
+    expect(deriveSshHost("", "")).toBe("");
   });
 });

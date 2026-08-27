@@ -566,7 +566,7 @@
 
     <div class="mb-4">
       <label class="block text-xs text-muted mb-1.5" for="ssh-host">
-        SSH Host <span class="opacity-60">(for "Open in Cursor")</span>
+        SSH Host <span class="opacity-60">(for "Open in VS Code / Cursor")</span>
       </label>
       <input
         id="ssh-host"
@@ -576,7 +576,7 @@
         bind:value={sshHost}
       />
       <p class="text-[11px] text-muted mt-1.5">
-        Must match an entry in your local <code class="text-accent/80">~/.ssh/config</code>. Leave empty for local mode.
+        Should match an entry in your local <code class="text-accent/80">~/.ssh/config</code>. Leave empty to use the address you're accessing webmux from.
       </p>
     </div>
     <div class="flex justify-end gap-2">

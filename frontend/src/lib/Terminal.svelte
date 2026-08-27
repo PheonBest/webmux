@@ -76,7 +76,41 @@
   }
 
   function scrollToBottom(): void {
+    // DEBUG (mobile scroll-to-bottom investigation) — remove once fixed.
+    const b = term?.buffer?.active;
+    console.debug("[scrollToBottom] before", {
+      ts: Date.now(),
+      worktree,
+      mouseTrackingMode: term?.modes?.mouseTrackingMode,
+      baseY: b?.baseY,
+      viewportY: b?.viewportY,
+      cursorY: b?.cursorY,
+      vpScrollTop: viewportEl?.scrollTop,
+      vpScrollHeight: viewportEl?.scrollHeight,
+      vpClientHeight: viewportEl?.clientHeight,
+    });
     term?.scrollToBottom();
+    const a = term?.buffer?.active;
+    console.debug("[scrollToBottom] after", {
+      baseY: a?.baseY,
+      viewportY: a?.viewportY,
+      vpScrollTop: viewportEl?.scrollTop,
+    });
+  }
+
+  function syncSize(): void {
+    fitAddon.fit();
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+    }
+  }
+
+  /** Re-fits the terminal to its container and pushes the new size to the
+   *  backend. Exposed for a manual "resize" control, since tmux occasionally
+   *  ends up out of sync with the container (e.g. after a layout change while
+   *  the tab was hidden). */
+  export function forceResize(): void {
+    syncSize();
   }
 
   /** Retries copying the last OSC 52 / selection text to the clipboard from
@@ -453,12 +487,7 @@
 
     resizeObs = new ResizeObserver(() => {
       clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => {
-        fitAddon.fit();
-        if (ws?.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
-        }
-      }, 150);
+      resizeTimer = setTimeout(syncSize, 150);
     });
     resizeObs.observe(containerEl);
 

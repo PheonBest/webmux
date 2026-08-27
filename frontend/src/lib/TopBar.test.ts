@@ -41,7 +41,7 @@ function createWorktree(
 function renderTopBar(
   branch: string,
   overrides: Partial<WorktreeInfo> = {},
-  props: Partial<{ oncopyterminal: () => void }> = {},
+  props: Partial<{ oncopyterminal: () => void; onforceresize: () => void }> = {},
 ): ReturnType<typeof render> {
   return render(TopBar, {
     props: {
@@ -76,6 +76,20 @@ describe("TopBar", () => {
     await fireEvent.click(screen.getByTitle("Copy last terminal selection to clipboard"));
 
     expect(oncopyterminal).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides the resize button when onforceresize is not provided", () => {
+    renderTopBar("feature/no-resize");
+    expect(screen.queryByTitle("Resize terminal")).not.toBeInTheDocument();
+  });
+
+  it("invokes onforceresize when the resize button is clicked", async () => {
+    const onforceresize = vi.fn();
+    renderTopBar("feature/resize", {}, { onforceresize });
+
+    await fireEvent.click(screen.getByTitle("Resize terminal"));
+
+    expect(onforceresize).toHaveBeenCalledTimes(1);
   });
 
   it("truncates worktree names longer than 30 characters in the header", () => {

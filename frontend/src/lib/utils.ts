@@ -57,6 +57,19 @@ export function prStatusShellClass(pr: Pick<PrEntry, "ciChecks" | "ciStatus" | "
   return "border-edge bg-surface";
 }
 
+/** Resolves the SSH host to use for "Open in VS Code / Cursor" links.
+ *  An explicit setting always wins; otherwise fall back to the address the
+ *  browser is currently on, so remote access works without configuration.
+ *  Returns "" (local mode) only for loopback / missing hostnames. */
+export function deriveSshHost(manual: string | null | undefined, hostname: string): string {
+  const trimmed = manual?.trim();
+  if (trimmed) return trimmed;
+  if (!hostname || hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]") {
+    return "";
+  }
+  return hostname;
+}
+
 export function makeCursorUrl(dir: string | null | undefined, sshHost: string | null): string | null {
   if (!dir) return null;
   if (sshHost) return `cursor://vscode-remote/ssh-remote+${sshHost}${dir}`;
