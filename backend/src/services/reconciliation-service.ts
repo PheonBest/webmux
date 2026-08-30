@@ -68,8 +68,13 @@ function findWindow(
   ) ?? null;
 }
 
-function resolveBranch(entry: GitWorktreeEntry, metaBranch: string | null): string {
+function resolveBranch(entry: GitWorktreeEntry, metaBranch: string | null, preferMeta = false): string {
   const fallback = basename(entry.path);
+  // A "direct" session shares the main repo's checkout with manual git use, so
+  // the live HEAD (entry.branch) can drift to another branch. Its identity is
+  // meta.branch — trusting the live HEAD there silently renames the workspace
+  // and breaks every branch-keyed lookup.
+  if (preferMeta && metaBranch) return metaBranch;
   return entry.branch ?? metaBranch ?? (fallback.length > 0 ? fallback : "unknown");
 }
 
@@ -199,7 +204,7 @@ export class ReconciliationService {
     const reconciledStates = await mapWithConcurrency(candidateEntries, this.concurrency, async (entry) => {
       const gitDir = this.deps.git.resolveWorktreeGitDir(entry.path);
       const meta = await readWorktreeMeta(gitDir);
-      const branch = resolveBranch(entry, meta?.branch ?? null);
+      const branch = resolveBranch(entry, meta?.branch ?? null, meta?.direct === true);
       const worktreeId = meta?.worktreeId ?? makeUnmanagedWorktreeId(entry.path);
       const gitStatus = this.deps.git.readWorktreeStatus(entry.path);
       const window = findWindow(windows, sessionName, branch);

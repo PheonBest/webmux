@@ -386,6 +386,52 @@ describe("ReconciliationService", () => {
     expect(runtime.getWorktreeByBranch("feature/stale-on-disk")).toBeNull();
   });
 
+  it("keeps a direct session under its recorded branch when the shared checkout's HEAD drifts", async () => {
+    // A "direct" (no-worktree) session runs on a branch in the main repo's own
+    // checkout. That checkout is shared with manual git use, so its live HEAD can
+    // move to another branch. The session's identity is meta.branch, not the live
+    // HEAD — otherwise every branch-keyed lookup (terminal attach, tabs) misses
+    // and the frontend reconnect-loops on "Worktree not found".
+    const repoRoot = "/repo/project";
+    const rootGitDir = await mkdtemp(join(tmpdir(), "webmux-reconcile-direct-"));
+    tempDirs.push(rootGitDir);
+
+    await writeWorktreeMeta(rootGitDir, {
+      schemaVersion: 1,
+      worktreeId: "wt_direct",
+      branch: "main",
+      createdAt: "2026-08-27T14:09:25.747Z",
+      profile: "slim",
+      agent: "claude",
+      runtime: "host",
+      startupEnvValues: {},
+      allocatedPorts: {},
+      direct: true,
+    });
+
+    const runtime = new ProjectRuntime();
+    // git worktree list reports the main checkout on whatever branch is live now.
+    const rootEntry = { path: repoRoot, branch: "docs/linear-sidebar-filters-spec", head: "aaa111", detached: false, bare: false };
+    const git = new FakeGitGateway(
+      [rootEntry],
+      new Map([[repoRoot, rootGitDir]]),
+      new Map([[repoRoot, { dirty: false, aheadCount: 0, currentCommit: "aaa111" }]]),
+    );
+
+    const service = new ReconciliationService({
+      config: TEST_CONFIG,
+      git,
+      tmux: new FakeTmuxGateway([]),
+      portProbe: new FakePortProbe(new Set()),
+      runtime,
+    });
+
+    await service.reconcile(repoRoot);
+
+    expect(runtime.getWorktree("wt_direct")?.branch).toBe("main");
+    expect(runtime.getWorktreeByBranch("docs/linear-sidebar-filters-spec")).toBeNull();
+  });
+
   it("creates synthetic ids for unmanaged worktrees", async () => {
     const repoRoot = "/repo/project";
     const unmanagedPath = "/repo/project/__worktrees/unmanaged";
